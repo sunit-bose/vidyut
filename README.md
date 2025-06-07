@@ -4,7 +4,7 @@
 
 ## Overview
 
-This project is an AI-powered agent designed to assist developers and teams by automating parts of the Pull Request (PR) review process. It fetches PR details (including full file content for changed files) from GitHub, performs an initial analysis of these changes (with foundational support for Python and Java, including linting), and offers suggestions related to potential impact areas, code reuse, design patterns (SOLID), unit tests, and security considerations. The agent is run via a command-line interface (CLI) and can process multiple PRs concurrently.
+This project is an AI-powered agent designed to assist developers and teams by automating parts of the Pull Request (PR) review process. It fetches PR details (including full file content for changed files) from GitHub, performs an initial analysis of these changes (with deeper inspection of Python code structure via AST parsing, and foundational support for Java, including linting), and offers suggestions related to potential impact areas, code reuse, design patterns (SOLID), unit tests, and security considerations. The agent is run via a command-line interface (CLI) and can process multiple PRs concurrently.
 
 The goal is to provide helpful insights to reviewers and authors, streamline the review cycle, and improve code quality over time. While currently in its initial phase with foundational analysis logic, the long-term vision is to build a more sophisticated and configurable review assistant.
 
@@ -13,14 +13,21 @@ The goal is to provide helpful insights to reviewers and authors, streamline the
 *   Fetches PR details (title, description, author, changed files, diffs) from GitHub.
 *   Fetches the full content of changed files from GitHub, enabling more accurate linting and future analysis.
 *   Accepts multiple PR URLs for concurrent processing.
-*   Static analysis for Python (Flake8) and Java (Checkstyle) files, operating on full file content.
+*   **Enhanced analysis for Python files:**
+    *   Uses Abstract Syntax Tree (AST) parsing to identify functions, classes, and methods.
+    *   Correlates AST information with PR changes to pinpoint **new or modified definitions**.
+    *   Provides **specific dependency notes** highlighting the signatures and locations of these new/modified Python definitions.
+    *   Generates **targeted unit test suggestions** for these specific new/modified functions, classes, and methods.
+*   **Static analysis and foundational support for Java files:**
+    *   Checkstyle integration for linting, operating on full file content.
+    *   Basic structure awareness with general suggestions.
 *   Rudimentary security keyword scanning in Python and Java code patches (e.g., for 'TODO:SECURITY', 'hardcoded_password').
 *   Generic handling for other file types (e.g., Markdown, text).
-*   Performs foundational analysis for:
-    *   Identifying modified files as impact areas.
+*   Performs foundational analysis for overall PR context:
+    *   Identifying modified files as general impact areas.
     *   Basic suggestions for code reuse if multiple files are changed (overall summary).
     *   Reminders for SOLID design principles (overall summary).
-*   Generates a list of suggestions, including general reminders for unit testing and security, plus file-specific points from linters and scans.
+*   Generates a list of suggestions, including general reminders for unit testing and security, plus file-specific points from linters, AST analysis, and scans.
 *   Command-line interface (CLI) to initiate reviews and display results.
 *   Basic unit test coverage for core modules.
 
@@ -104,8 +111,6 @@ Contributions are welcome! If you have suggestions for improvements or new featu
 ## License
 
 This project is licensed under the MIT License. (See the `LICENSE` file for details).
-<!-- Note: The previous README said "to be added in a subsequent step" for LICENSE file,
-     but it was added. Correcting this note. -->
 
 ## Future Roadmap
 
