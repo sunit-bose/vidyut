@@ -1,181 +1,163 @@
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 
-# Assuming tests are run from the project root, and PYTHONPATH is set up (e.g., by pytest)
-# such that 'src' is importable.
+# Assuming tests are run from the project root and PYTHONPATH is set up
+# (e.g., by pytest) such that 'src' is importable.
 from src.main import main
 
 @pytest.fixture
-def mock_get_pr_details(mocker):
-    # Patching where the function is looked up: in the 'src.main' module's namespace.
-    return mocker.patch('src.main.get_pr_details')
+def mock_process_single_pr(mocker):
+    # Patch process_single_pr where it's looked up by main.py (in its own module's namespace)
+    return mocker.patch('src.main.process_single_pr')
 
-@pytest.fixture
-def mock_analyze_code_changes(mocker):
-    return mocker.patch('src.main.analyze_code_changes')
+VALID_PR_URL_1 = "https://github.com/test/repo/pull/1"
+VALID_PR_URL_2 = "https://github.com/test/repo/pull/2"
+VALID_PR_URL_3 = "https://github.com/test/repo/pull/3"
 
-@pytest.fixture
-def mock_generate_suggestions(mocker):
-    return mocker.patch('src.main.generate_suggestions')
+# Example successful return value from process_single_pr
+# (pr_url, pr_title, html_url, suggestions_list, error_message)
+SUCCESS_RESULT_1 = (
+    VALID_PR_URL_1,
+    "PR Title 1",
+    VALID_PR_URL_1, # html_url
+    ["Suggestion A for PR1", "Suggestion B for PR1"],
+    None # No error
+)
+SUCCESS_RESULT_2 = (
+    VALID_PR_URL_2,
+    "PR Title 2",
+    VALID_PR_URL_2, # html_url
+    ["Suggestion C for PR2"],
+    None # No error
+)
+# Example failure return value from process_single_pr
+FAILURE_RESULT_3 = (
+    VALID_PR_URL_3,
+    None, # No title on failure
+    None, # No html_url on failure
+    None, # No suggestions on failure
+    "Simulated processing error for PR3" # Error message
+)
 
-VALID_PR_URL = "https://github.com/test/repo/pull/1"
+def test_main_multiple_prs_all_success(mock_process_single_pr, capsys):
+    """Test processing multiple PR URLs where all calls to process_single_pr succeed."""
 
-# Helper to create a minimal valid pr_data dictionary
-def create_mock_pr_data(title='Test PR', author='testuser', files_changed_count=1, html_url=VALID_PR_URL):
-    files = []
-    if files_changed_count > 0:
-        files = [{'filename': f'file{i}.py', 'status': 'modified', 'additions':1, 'deletions':1, 'changes':2, 'patch':'...'} for i in range(files_changed_count)]
+    # Configure the mock to return different results based on input URL
+    def side_effect_func(pr_url):
+        if pr_url == VALID_PR_URL_1:
+            return SUCCESS_RESULT_1
+        elif pr_url == VALID_PR_URL_2:
+            return SUCCESS_RESULT_2
+        # Fallback for any unexpected URL call during the test
+        return (pr_url, "Unknown Title", pr_url, [], f"Mock error: Unexpected URL {pr_url}")
 
-    return {
-        'title': title,
-        'author': author,
-        'files_changed': files,
-        'html_url': html_url,
-        # Add other keys that main.py might use for printing or conditions.
-        # These were present in the original snippet for pr_parser.py:
-        'body': 'Test PR description.',
-        'user': {'login': author}, # pr_parser stores user login under 'author' after processing
-        'created_at': '2023-01-01T10:00:00Z',
-        'updated_at': '2023-01-01T11:00:00Z',
-        'state': 'open',
-        'commits_url': f"https://api.github.com/repos/test/repo/pulls/1/commits",
-        'comments_url': f"https://api.github.com/repos/test/repo/pulls/1/comments",
-        'diff': 'mock diff content' # Added, as pr_parser would fetch this
-    }
+    mock_process_single_pr.side_effect = side_effect_func
 
-def test_main_successful_flow(
-    mock_get_pr_details,
-    mock_analyze_code_changes,
-    mock_generate_suggestions,
-    capsys
-):
-    """Test the main CLI flow with successful operations."""
-    mock_pr_data = create_mock_pr_data(files_changed_count=1)
-    mock_analysis_results = {'impact_areas': ['Impact 1'], 'reuse_suggestions':['Reuse 1'], 'solid_violations':['SOLID 1']}
-    mock_suggestions = ["Suggestion 1: Test", "Suggestion 2: Secure"]
-
-    mock_get_pr_details.return_value = mock_pr_data
-    mock_analyze_code_changes.return_value = mock_analysis_results
-    mock_generate_suggestions.return_value = mock_suggestions
-
-    # Patch sys.argv for argparse. Argv[0] is conventionally the script name.
-    with patch('sys.argv', ['src/main.py', VALID_PR_URL]):
+    test_urls = [VALID_PR_URL_1, VALID_PR_URL_2]
+    # Patch sys.argv to simulate command line arguments. main.py is script name.
+    with patch('sys.argv', ['src/main.py'] + test_urls):
         main()
 
     captured = capsys.readouterr()
 
-    mock_get_pr_details.assert_called_once_with(VALID_PR_URL)
-    mock_analyze_code_changes.assert_called_once_with(mock_pr_data)
-    mock_generate_suggestions.assert_called_once_with(mock_analysis_results)
+    # Check that process_single_pr was called for each URL
+    # The order of calls can vary due to ThreadPoolExecutor, so any_order=True
+    expected_calls = [call(VALID_PR_URL_1), call(VALID_PR_URL_2)]
+    mock_process_single_pr.assert_has_calls(expected_calls, any_order=True)
+    assert mock_process_single_pr.call_count == len(test_urls)
 
-    assert f"Starting review for PR: {VALID_PR_URL}" in captured.out
-    assert f"Successfully fetched details for PR: {mock_pr_data['title']}" in captured.out
-    assert f"Author: {mock_pr_data['author']}" in captured.out
-    assert f"Files changed: {len(mock_pr_data['files_changed'])}" in captured.out
-    assert "Analyzing code changes..." in captured.out
-    assert "Code analysis complete." in captured.out # This message is always printed
-    assert "Generating suggestions..." in captured.out
-    assert "Suggestions generated." in captured.out # This message is always printed
-    assert "--- PR Review Suggestions ---" in captured.out
-    assert f"PR Title: {mock_pr_data['title']}" in captured.out
-    assert f"PR URL: {mock_pr_data['html_url']}" in captured.out
-    assert "1. Suggestion 1: Test" in captured.out
-    assert "2. Suggestion 2: Secure" in captured.out
-    assert "--- End of Review ---" in captured.out
 
-def test_main_pr_fetch_fails(mock_get_pr_details, mock_analyze_code_changes, mock_generate_suggestions, capsys):
-    mock_get_pr_details.return_value = None # Simulate failure to fetch PR details
+    # Check for PR1's output (order in output depends on thread completion)
+    assert f"Review for PR: {VALID_PR_URL_1}" in captured.out
+    assert "Title: PR Title 1" in captured.out
+    assert f"Link: {VALID_PR_URL_1}" in captured.out # Check actual link
+    assert "Status: COMPLETED" in captured.out
+    assert "1. Suggestion A for PR1" in captured.out
+    assert "2. Suggestion B for PR1" in captured.out
 
-    with patch('sys.argv', ['src/main.py', VALID_PR_URL]):
+    # Check for PR2's output
+    assert f"Review for PR: {VALID_PR_URL_2}" in captured.out
+    assert "Title: PR Title 2" in captured.out
+    assert f"Link: {VALID_PR_URL_2}" in captured.out
+    assert "Status: COMPLETED" in captured.out
+    assert "1. Suggestion C for PR2" in captured.out
+
+    assert "All PRs Processed. Review Summaries:" in captured.out
+    # Note: The "Thread: Starting processing..." messages are printed by the original
+    # process_single_pr. Since we've mocked process_single_pr, these prints
+    # won't occur from the mock. So, we don't assert them here.
+
+
+def test_main_multiple_prs_mixed_results(mock_process_single_pr, capsys):
+    """Test processing multiple PR URLs with a mix of success and failure."""
+    def side_effect_func(pr_url):
+        if pr_url == VALID_PR_URL_1:
+            return SUCCESS_RESULT_1
+        elif pr_url == VALID_PR_URL_3: # This one will "fail" as per FAILURE_RESULT_3
+            return FAILURE_RESULT_3
+        return (pr_url, "Unknown Title", pr_url, [], f"Mock error: Unexpected URL {pr_url}")
+
+    mock_process_single_pr.side_effect = side_effect_func
+
+    test_urls = [VALID_PR_URL_1, VALID_PR_URL_3]
+    with patch('sys.argv', ['src/main.py'] + test_urls):
         main()
 
     captured = capsys.readouterr()
-    mock_get_pr_details.assert_called_once_with(VALID_PR_URL)
-    assert "Failed to fetch PR details. Exiting." in captured.out
-    mock_analyze_code_changes.assert_not_called()
-    mock_generate_suggestions.assert_not_called()
 
-def test_main_analysis_returns_empty_structure(mock_get_pr_details, mock_analyze_code_changes, mock_generate_suggestions, capsys):
-    """ Test when analysis returns an empty structure but not None.
-        The main.py code has a check `if not analysis_results:`, which would be false for an empty dict.
-        The current main.py does not explicitly check for empty analysis results to exit.
-        It prints "Code analysis complete." and proceeds.
-    """
-    mock_pr_data = create_mock_pr_data()
-    # Simulate analysis returning an "empty" but valid structure
-    mock_empty_analysis_results = {'impact_areas': [], 'reuse_suggestions':[], 'solid_violations':[]}
-    mock_suggestions_from_empty_analysis = ["No specific suggestions based on the current analysis. General best practices still apply."]
+    expected_calls = [call(VALID_PR_URL_1), call(VALID_PR_URL_3)]
+    mock_process_single_pr.assert_has_calls(expected_calls, any_order=True)
+    assert mock_process_single_pr.call_count == len(test_urls)
 
+    # Check output for PR1 (Success)
+    assert f"Review for PR: {VALID_PR_URL_1}" in captured.out
+    assert "Title: PR Title 1" in captured.out
+    assert "Status: COMPLETED" in captured.out
+    assert "1. Suggestion A for PR1" in captured.out
 
-    mock_get_pr_details.return_value = mock_pr_data
-    mock_analyze_code_changes.return_value = mock_empty_analysis_results
-    mock_generate_suggestions.return_value = mock_suggestions_from_empty_analysis
+    # Check output for PR3 (Failure)
+    assert f"Review for PR: {VALID_PR_URL_3}" in captured.out
+    # For failure, title might not be present in the output if it's None in FAILURE_RESULT_3
+    assert "Title: PR Title 3" not in captured.out
+    assert "Link: https://github.com/test/repo/pull/3" in captured.out # Link should be the input URL
+    assert "Status: FAILED" in captured.out
+    assert "Error: Simulated processing error for PR3" in captured.out
+    # Ensure suggestions for PR1 are not mixed with PR3's error output incorrectly
+    assert "Suggestion A for PR1" in captured.out
 
+def test_main_single_pr_url_still_works(mock_process_single_pr, capsys):
+    """Test that providing a single PR URL still works correctly with the new concurrent setup."""
+    mock_process_single_pr.return_value = SUCCESS_RESULT_1 # Mock for the single URL
 
-    with patch('sys.argv', ['src/main.py', VALID_PR_URL]):
+    with patch('sys.argv', ['src/main.py', VALID_PR_URL_1]):
         main()
 
     captured = capsys.readouterr()
-    mock_get_pr_details.assert_called_once_with(VALID_PR_URL)
-    mock_analyze_code_changes.assert_called_once_with(mock_pr_data)
-    mock_generate_suggestions.assert_called_once_with(mock_empty_analysis_results)
+    mock_process_single_pr.assert_called_once_with(VALID_PR_URL_1)
+    assert f"Review for PR: {VALID_PR_URL_1}" in captured.out
+    assert "Title: PR Title 1" in captured.out
+    assert "1. Suggestion A for PR1" in captured.out
+    assert f"Starting review for 1 PR(s)" in captured.out # Check count
 
-    # Check that the flow continues even with "empty" analysis
-    assert "Code analysis complete." in captured.out
-    assert "Suggestions generated." in captured.out
-    assert mock_suggestions_from_empty_analysis[0] in captured.out
-
-
-def test_main_suggestion_generation_returns_empty_list(
-    mock_get_pr_details,
-    mock_analyze_code_changes,
-    mock_generate_suggestions,
-    capsys
-):
-    """ Test when suggestion generation returns an empty list.
-        main.py has: `if not suggestions: print("No suggestions were generated. Exiting.")`
-        However, the `generate_suggestions` function itself is designed to return a default message
-        if its internal list is empty. So, for it to return truly [] would be unusual unless it errored.
-        The test in main.py for `if not suggestions:` might be for a case where generate_suggestions
-        itself returns None or an empty list due to an internal unhandled issue.
-        Let's assume generate_suggestions could return [] if it internally fails before adding default.
-    """
-    mock_pr_data = create_mock_pr_data()
-    mock_analysis_results = {'impact_areas': ['Impact 1'], 'reuse_suggestions':[], 'solid_violations':[]}
-
-    mock_get_pr_details.return_value = mock_pr_data
-    mock_analyze_code_changes.return_value = mock_analysis_results
-    mock_generate_suggestions.return_value = [] # Simulate generate_suggestions returning an empty list
-
-    with patch('sys.argv', ['src/main.py', VALID_PR_URL]):
-        main()
-
-    captured = capsys.readouterr()
-    mock_generate_suggestions.assert_called_once_with(mock_analysis_results)
-
-    # Based on main.py: `if not suggestions:` (after calling generate_suggestions)
-    # it prints `No suggestions were generated.` and then `No suggestions available to display.`
-    # It does *not* print "Exiting" and then stop the whole "--- PR Review Suggestions ---" block.
-    # It will proceed to print the suggestions header, and then "No suggestions available to display."
-    assert "No suggestions were generated, or suggestion generation failed." in captured.out # This is from main.py
-    assert "--- PR Review Suggestions ---" in captured.out
-    assert "No suggestions available to display." in captured.out
-
-
-def test_main_no_pr_url_argument(capsys):
-    # Patch sys.argv to simulate calling the script without the pr_url argument.
-    # Argv[0] is script name.
-    with patch('sys.argv', ['src/main.py']):
+def test_main_no_pr_url_argument_still_causes_argparse_exit(capsys):
+    """Ensure argparse still handles no PR URLs correctly and exits."""
+    with patch('sys.argv', ['src/main.py']): # No URL arguments provided
         with pytest.raises(SystemExit) as e:
-             main() # This will call parser.parse_args() which will exit.
+             main()
 
     assert e.type == SystemExit
-    # Argparse exits with code 2 for argument errors.
+    # Argparse typically exits with code 2 for CLI argument errors
     assert e.value.code == 2
 
     captured = capsys.readouterr()
     # Argparse prints usage to stderr for errors.
-    assert "usage: main.py" in captured.err # main.py is what argparse sees due to sys.argv[0]
-    assert "the following arguments are required: pr_url" in captured.err
+    # The script name in usage message is taken from sys.argv[0]
+    assert "usage: main.py" in captured.err # main.py or src/main.py depending on patch
+    assert "the following arguments are required: pr_urls" in captured.err # 'pr_urls' is the new arg name
 
-# The placeholder test_example_main is automatically removed by overwriting the file.
+# Previous tests that mocked get_pr_details, analyze_code_changes, generate_suggestions
+# individually for main.py are effectively superseded by these tests, as that logic
+# is now encapsulated in process_single_pr, which is what we are mocking here.
+# If those old tests were testing the internal logic of those functions via main.py,
+# that's now better done by testing process_single_pr directly (if it were more complex)
+# or by relying on the dedicated unit tests for pr_parser, code_analyzer, etc.
