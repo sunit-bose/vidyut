@@ -1,6 +1,7 @@
 import requests
 import re
-import base64 # Add this import
+import base64
+from typing import Union, Dict # Added for type hinting
 
 def get_pr_details(pr_url):
     """
@@ -97,7 +98,7 @@ if __name__ == '__main__':
     pass
 
 
-def get_file_content_at_ref(owner: str, repo: str, file_path: str, ref: str, headers: dict) -> str | None:
+def get_file_content_at_ref(owner: str, repo: str, file_path: str, ref: str, headers: Dict[str, str]) -> Union[str, None]:
     """
     Fetches the content of a file from a GitHub repository at a specific ref (commit SHA, branch, tag).
 

@@ -1,5 +1,6 @@
 import argparse
 import concurrent.futures
+from typing import Tuple, Optional, List # Added for type hinting
 
 # To allow running this as a script from the root directory (e.g., python -m src.main)
 # and also to handle potential imports if this were part of a larger package.
@@ -22,7 +23,7 @@ else:
 
 MAX_WORKERS = 4 # Process up to 4 PRs concurrently
 
-def process_single_pr(pr_url):
+def process_single_pr(pr_url: str) -> Tuple[str, Optional[str], Optional[str], Optional[List[str]], Optional[str]]:
     """
     Processes a single PR: fetches details, analyzes, and generates suggestions.
     Returns a tuple: (pr_url, pr_title, html_url, suggestions_list, error_message)
