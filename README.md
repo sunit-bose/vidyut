@@ -8,7 +8,22 @@ This is an AI agent project.
 
 ## Usage
 
-[Instructions for using the agent will be added here.]
+To run the agent, provide one or more GitHub Pull Request URLs:
+
+```bash
+python -m src.main <pr_url_1> [pr_url_2 ...]
+```
+
+For example:
+```bash
+python -m src.main https://github.com/owner/repo/pull/123 https://github.com/owner/repo/pull/456
+```
+
+Ensure necessary dependencies are installed:
+```bash
+pip install -r requirements.txt
+```
+The agent will process these PRs concurrently (up to a default limit) and display the review suggestions for each.
 
 ## Configuration
 
