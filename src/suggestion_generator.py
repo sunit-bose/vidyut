@@ -58,10 +58,21 @@ def generate_suggestions(analysis_results):
             for sec_issue in security_issues:
                 suggestions.append(f"  Security Concern: {sec_issue}")
 
+            linting_issues = finding.get('linting_issues', [])
+            if linting_issues:
+                linter_name = "Flake8" if language == "python" else "Checkstyle" if language == "java" else "Linter"
+                suggestions.append(f"  Linting Issues ({language} - {linter_name}):")
+                for issue in linting_issues:
+                    # For Checkstyle, severity might be available and useful
+                    severity_info = f" (Severity: {issue.get('severity', 'info')})" if language == "java" else ""
+                    suggestions.append(
+                        f"    L{issue['line']}:{issue.get('column',0)} [{issue.get('code','N/A')}] {issue.get('message', 'N/A')}{severity_info}"
+                    )
+
             # If it's a code file but no specific suggestions were generated from the above categories
             # The 'impacts' are always shown if present (handled above).
             # This checks if there were no other specific findings for code files.
-            if not any([dependencies, tests_suggestions, security_issues]):
+            if not any([dependencies, tests_suggestions, security_issues, linting_issues]): # Added linting_issues here
                  suggestions.append(f"  No further specific code analysis suggestions for this {language} file in this phase.")
 
         elif language == 'other':

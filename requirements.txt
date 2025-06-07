@@ -2,3 +2,4 @@ requests
 pytest
 pytest-mock
 javalang
+flake8

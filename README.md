@@ -4,21 +4,23 @@
 
 ## Overview
 
-This project is an AI-powered agent designed to assist developers and teams by automating parts of the Pull Request (PR) review process. It fetches PR details from GitHub, performs an initial analysis of the changes (with foundational support for Python and Java), and offers suggestions related to potential impact areas, code reuse, design patterns (SOLID), unit tests, and security considerations. The agent is run via a command-line interface (CLI) and can process multiple PRs concurrently.
+This project is an AI-powered agent designed to assist developers and teams by automating parts of the Pull Request (PR) review process. It fetches PR details (including full file content for changed files) from GitHub, performs an initial analysis of these changes (with foundational support for Python and Java, including linting), and offers suggestions related to potential impact areas, code reuse, design patterns (SOLID), unit tests, and security considerations. The agent is run via a command-line interface (CLI) and can process multiple PRs concurrently.
 
 The goal is to provide helpful insights to reviewers and authors, streamline the review cycle, and improve code quality over time. While currently in its initial phase with foundational analysis logic, the long-term vision is to build a more sophisticated and configurable review assistant.
 
 ## Current Features (Phase 1)
 
 *   Fetches PR details (title, description, author, changed files, diffs) from GitHub.
+*   Fetches the full content of changed files from GitHub, enabling more accurate linting and future analysis.
 *   Accepts multiple PR URLs for concurrent processing.
-*   Initial support for analyzing Python and Java files, alongside generic handling for other file types.
+*   Static analysis for Python (Flake8) and Java (Checkstyle) files, operating on full file content.
 *   Rudimentary security keyword scanning in Python and Java code patches (e.g., for 'TODO:SECURITY', 'hardcoded_password').
+*   Generic handling for other file types (e.g., Markdown, text).
 *   Performs foundational analysis for:
     *   Identifying modified files as impact areas.
     *   Basic suggestions for code reuse if multiple files are changed (overall summary).
     *   Reminders for SOLID design principles (overall summary).
-*   Generates a list of suggestions, including general reminders for unit testing and security, plus file-specific points.
+*   Generates a list of suggestions, including general reminders for unit testing and security, plus file-specific points from linters and scans.
 *   Command-line interface (CLI) to initiate reviews and display results.
 *   Basic unit test coverage for core modules.
 
@@ -28,12 +30,15 @@ The goal is to provide helpful insights to reviewers and authors, streamline the
 *   `requests`: For making HTTP requests to the GitHub API.
 *   `pytest`: For unit testing.
 *   `pytest-mock`: For mocking in tests.
-*   `javalang`: For basic parsing of Java code structure (foundational).
+*   `javalang`: For basic parsing of Java code structure (foundational, used alongside Checkstyle).
+*   `flake8`: For Python linting.
+*   Checkstyle: For Java linting (external tool, see Tool Setup).
 
 ## Prerequisites
 
 *   Git
 *   Python 3.7+ (or as per your environment's Python 3 version)
+*   Java Runtime Environment (JRE) for Java linting (see Tool Setup).
 
 ## Installation
 
@@ -50,10 +55,24 @@ The goal is to provide helpful insights to reviewers and authors, streamline the
     source venv/bin/activate  # On Windows use `venv\Scripts\activate`
     ```
 
-3.  **Install dependencies:**
+3.  **Install Python dependencies:**
     ```bash
     pip install -r requirements.txt
     ```
+
+## Tool Setup
+
+### Java Linting Setup (Checkstyle)
+
+To enable Java linting with Checkstyle, you need to have the following set up in your environment:
+
+1.  **Java Runtime Environment (JRE):** A JRE (version 8 or higher recommended) must be installed and its `java` command accessible.
+2.  **Checkstyle JAR:** Download the Checkstyle JAR file (e.g., `checkstyle-X.Y-all.jar`). You can find the latest releases on the [Checkstyle GitHub releases page](https://github.com/checkstyle/checkstyle/releases).
+    *   The agent attempts to run Checkstyle by invoking `java -jar <path_to_checkstyle.jar> ...`.
+    *   You can make the Checkstyle JAR accessible by:
+        *   Placing it in a directory that's part of your system's `PATH` and renaming the JAR to `checkstyle.jar`.
+        *   Setting the `CHECKSTYLE_JAR` environment variable to the full path of the JAR file (e.g., `export CHECKSTYLE_JAR=/path/to/your/checkstyle-10.3.2-all.jar`).
+3.  **Configuration:** The agent includes a default Checkstyle configuration based on Google's Java Style Guide, located at `config/google_checks.xml`. For custom checks, you would modify this file or use a mechanism (to be implemented in future versions) to specify a custom configuration file path.
 
 ## Usage
 
@@ -68,7 +87,15 @@ For example:
 python -m src.main https://github.com/owner/repo/pull/123 https://github.com/owner/repo/pull/456
 ```
 
-Ensure necessary dependencies are installed (as per the Installation section). The agent will process these PRs concurrently (up to a default limit of 4) and display the review suggestions for each.
+Ensure necessary dependencies are installed (as per the Installation section) and tools are set up (see Tool Setup). The agent will process these PRs concurrently (up to a default limit of 4) and display the review suggestions for each.
+
+### GitHub API Rate Limiting & Private Repositories
+
+The agent makes calls to the GitHub API. For unauthenticated requests, GitHub imposes rate limits. If you are analyzing many PRs, large PRs with many files, or private repositories, you may encounter these limits or require authentication.
+
+To use a GitHub Personal Access Token (PAT):
+*   Generate a PAT from your GitHub account with appropriate permissions (e.g., `repo` scope for private repositories).
+*   *(Note: The agent currently does not have a direct command-line option or configuration file setting for tokens. To use a token with the current version, you would need to modify the `api_headers` in `src/code_analyzer.py` (within `_analyze_python_file` and `_analyze_java_file` when `get_file_content_at_ref` is called) to include the `Authorization` header, like `api_headers["Authorization"] = f"token YOUR_PAT_HERE"`. Secure token management via configuration will be improved in future versions.)*
 
 ## Contributing
 
@@ -76,7 +103,9 @@ Contributions are welcome! If you have suggestions for improvements or new featu
 
 ## License
 
-This project is licensed under the MIT License. (See the `LICENSE` file for details - to be added in a subsequent step).
+This project is licensed under the MIT License. (See the `LICENSE` file for details).
+<!-- Note: The previous README said "to be added in a subsequent step" for LICENSE file,
+     but it was added. Correcting this note. -->
 
 ## Future Roadmap
 
@@ -93,7 +122,7 @@ This project aims to evolve into a comprehensive and intelligent PR review assis
     *   Potentially incorporate a rules engine or simple ML models for ranking suggestions.
 
 ### Architectural & Technical Improvements
-*   **Configuration Management:** Implement a system for managing configurations (e.g., API keys for private repos, analysis rule settings, output preferences) via configuration files or environment variables.
+*   **Configuration Management:** Implement a system for managing configurations (e.g., API keys for private repos, analysis rule settings, output preferences) via configuration files or environment variables, including for the GitHub token and Checkstyle JAR path.
 *   **Scalability & Performance:**
     *   **Asynchronous Operations:** Transition core I/O-bound operations (like API calls) to use `asyncio` and `aiohttp` for improved performance, especially under higher load.
     *   **Caching:** Implement caching for API responses and potentially for analysis results of unchanged code sections to reduce redundant processing and API calls.

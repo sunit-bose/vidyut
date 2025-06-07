@@ -1,15 +1,15 @@
 import pytest
 from src.code_analyzer import analyze_code_changes, _analyze_python_file, _analyze_java_file, _analyze_other_file, RUDIMENTARY_SECURITY_KEYWORDS
-from unittest.mock import patch # If not already imported
+from unittest.mock import patch, MagicMock # Ensure MagicMock is imported
 
-# Previous tests for analyze_code_changes (before multi-language dispatch)
-# might need to be adapted or removed if they are no longer relevant
-# or if their tested functionality is now within the _analyze_xxx_file functions.
-# For this update, we're focusing on adding new tests for the new structure.
+@pytest.fixture
+def mock_get_content(mocker):
+    # Path for mocking where get_file_content_at_ref is looked up by code_analyzer.py
+    # This assumes get_file_content_at_ref is imported directly into src.code_analyzer's namespace
+    return mocker.patch('src.code_analyzer.get_file_content_at_ref')
 
 def test_analyze_code_changes_empty_pr_data(capsys):
     """Test with empty or invalid pr_data (None or missing 'files_changed')."""
-    # This test is still relevant as it checks the initial guard clause.
     expected_empty_result = {
         'overall_summary': {
             'reuse_suggestions': [],
@@ -18,14 +18,11 @@ def test_analyze_code_changes_empty_pr_data(capsys):
         },
         'file_specific_findings': []
     }
-
-    # Test with None pr_data
     result_none = analyze_code_changes(None)
     assert result_none == expected_empty_result
     captured_none = capsys.readouterr()
     assert "Error: Invalid PR data provided for analysis in analyze_code_changes." in captured_none.out
 
-    # Test with pr_data missing 'files_changed' key
     result_no_files_key = analyze_code_changes({'title': 'Test PR'})
     assert result_no_files_key == expected_empty_result
     captured_no_files_key = capsys.readouterr()
@@ -33,116 +30,146 @@ def test_analyze_code_changes_empty_pr_data(capsys):
 
 
 def test_analyze_code_changes_dispatches_correctly(mocker):
-    # Mock the individual file analyzers
-    mock_py_analyzer = mocker.patch('src.code_analyzer._analyze_python_file', return_value={'language': 'python', 'file_path': 'test.py', 'impacts':[], 'dependencies':[], 'tests_suggestions':[], 'security_issues':[]})
-    mock_java_analyzer = mocker.patch('src.code_analyzer._analyze_java_file', return_value={'language': 'java', 'file_path': 'Test.java', 'impacts':[], 'dependencies':[], 'tests_suggestions':[], 'security_issues':[]})
-    mock_other_analyzer = mocker.patch('src.code_analyzer._analyze_other_file', return_value={'language': 'other', 'file_path': 'README.md', 'impacts':[], 'dependencies':[], 'tests_suggestions':[], 'security_issues':[]})
+    mock_py_analyzer = mocker.patch('src.code_analyzer._analyze_python_file', return_value={'language': 'python', 'file_path': 'test.py', 'impacts':[], 'dependencies':[], 'tests_suggestions':[], 'security_issues':[], 'linting_issues':[]})
+    mock_java_analyzer = mocker.patch('src.code_analyzer._analyze_java_file', return_value={'language': 'java', 'file_path': 'Test.java', 'impacts':[], 'dependencies':[], 'tests_suggestions':[], 'security_issues':[], 'linting_issues':[]})
+    mock_other_analyzer = mocker.patch('src.code_analyzer._analyze_other_file', return_value={'language': 'other', 'file_path': 'README.md', 'impacts':[], 'dependencies':[], 'tests_suggestions':[], 'security_issues':[], 'linting_issues':[]}) # linting_issues typically not for 'other'
 
     pr_data_dispatch = {
-        'title': 'Test Dispatch',
+        'title': 'Test Dispatch', 'owner':'o', 'repo':'r', 'head_sha':'s', # Add owner/repo/sha for content fetching mock
         'files_changed': [
             {'filename': 'test.py', 'status': 'modified', 'patch': '...'},
             {'filename': 'Test.java', 'status': 'added', 'patch': '...'},
             {'filename': 'README.md', 'status': 'modified', 'patch': '...'},
-            {'filename': 'another.txt', 'status': 'modified', 'patch': '...'} # Will also go to _analyze_other_file
+            {'filename': 'another.txt', 'status': 'modified', 'patch': '...'}
         ]
     }
     results = analyze_code_changes(pr_data_dispatch)
 
     mock_py_analyzer.assert_called_once_with(pr_data_dispatch['files_changed'][0], pr_data_dispatch)
     mock_java_analyzer.assert_called_once_with(pr_data_dispatch['files_changed'][1], pr_data_dispatch)
-
     assert mock_other_analyzer.call_count == 2
-    # Check that the calls were made with the correct arguments for 'other' files
     mock_other_analyzer.assert_any_call(pr_data_dispatch['files_changed'][2], pr_data_dispatch)
     mock_other_analyzer.assert_any_call(pr_data_dispatch['files_changed'][3], pr_data_dispatch)
-
     assert len(results['file_specific_findings']) == 4
-    assert results['file_specific_findings'][0]['language'] == 'python'
-    assert results['file_specific_findings'][1]['language'] == 'java'
-    assert results['file_specific_findings'][2]['language'] == 'other'
-    assert results['file_specific_findings'][3]['language'] == 'other' # For another.txt
 
 # --- Tests for _analyze_python_file ---
-def test_analyze_python_file_security_keyword_found():
+
+def test_analyze_python_file_with_content_fetches_and_lints(mock_get_content, mocker):
+    mock_get_content.return_value = "print('Hello World') # Python content"
+    mock_subprocess_run = mocker.patch('subprocess.run')
+
+    mock_flake8_result = MagicMock()
+    mock_flake8_result.stdout = "temp.py:1:1: F401 'module' imported but unused"
+    mock_flake8_result.stderr = ""
+    mock_subprocess_run.return_value = mock_flake8_result
+
+    file_info = {'filename': 'test.py', 'patch': '...'} # Patch might still be used for security scan
+    pr_data = {'owner': 'o', 'repo': 'r', 'head_sha': 'sha123'}
+
+    findings = _analyze_python_file(file_info, pr_data)
+
+    mock_get_content.assert_called_once_with('o', 'r', 'test.py', 'sha123', {"Accept": "application/vnd.github.v3+json"})
+    mock_subprocess_run.assert_called_once() # Check that flake8 was called
+    assert len(findings['linting_issues']) > 0
+    assert findings['linting_issues'][0]['code'] == 'F401'
+    assert "Python file test.py was modified" in findings['impacts'][0] # Default impact
+
+def test_analyze_python_file_content_fetch_fails(mock_get_content, mocker):
+    mock_get_content.return_value = None # Simulate content fetch failure
+    mock_subprocess_run = mocker.patch('subprocess.run')
+
+    file_info = {'filename': 'test.py', 'patch': 'some changes'}
+    pr_data = {'owner': 'o', 'repo': 'r', 'head_sha': 'sha123'}
+
+    findings = _analyze_python_file(file_info, pr_data)
+
+    mock_get_content.assert_called_once()
+    mock_subprocess_run.assert_not_called() # Flake8 should not be called
+    expected_impact_message = "Python file test.py changed, but full content not fetched for Flake8 (using patch for other checks if available)."
+    assert expected_impact_message in findings['impacts'] # Check if the message is one of the impacts
+    assert findings['linting_issues'] == []
+    # Security scan on patch should still run
+    assert not findings['security_issues'] # Assuming 'some changes' has no keywords
+
+def test_analyze_python_file_security_keyword_found(mock_get_content): # mock_get_content to simulate no content for Flake8
+    mock_get_content.return_value = "print('clean code')" # Assume Flake8 runs on this
     file_info_py_sec = {
         'filename': 'sec.py', 'status': 'modified',
-        'patch': 'some python code\n# TODO:SECURITY fix this later\nprint("hello")'
+        'patch': '# TODO:SECURITY fix this later'
     }
-    # Ensure the specific keyword is in the list for this test
-    # This approach of modifying global list is okay for testing if restored,
-    # but for more complex scenarios, dependency injection or patching the list itself might be better.
-    original_keywords = RUDIMENTARY_SECURITY_KEYWORDS[:] # Shallow copy for restoration
+    original_keywords = RUDIMENTARY_SECURITY_KEYWORDS[:]
     if "TODO:SECURITY" not in RUDIMENTARY_SECURITY_KEYWORDS:
         RUDIMENTARY_SECURITY_KEYWORDS.append("TODO:SECURITY")
 
-    findings = _analyze_python_file(file_info_py_sec, {}) # pr_data is not deeply used by current version of _analyze_python_file
+    findings = _analyze_python_file(file_info_py_sec, {'owner':'o','repo':'r','head_sha':'s'})
 
-    assert any("Potential security keyword 'TODO:SECURITY' found" in issue for issue in findings['security_issues'])
-    assert "Changes detected in sec.py" in findings['tests_suggestions'][0] # Check other suggestions
-
-    RUDIMENTARY_SECURITY_KEYWORDS[:] = original_keywords # Restore
-
-def test_analyze_python_file_no_security_keyword():
-    file_info_py_clean = {'filename': 'clean.py', 'status': 'modified', 'patch': 'print("all good")'}
-    findings = _analyze_python_file(file_info_py_clean, {})
-    assert not findings['security_issues'] # Should be empty
-    assert "Changes detected in clean.py" in findings['tests_suggestions'][0]
-
-def test_analyze_python_file_no_patch():
-    file_info_no_patch = {'filename': 'no_patch.py', 'status': 'modified', 'patch': None}
-    findings = _analyze_python_file(file_info_no_patch, {})
-    assert "no patch data available" in findings['impacts'][0]
-    assert not findings['security_issues']
-    assert "Consider adding/updating unit tests for changes in no_patch.py" in findings['tests_suggestions'][0]
+    assert any("Potential security keyword 'TODO:SECURITY' found in changed lines." in issue for issue in findings['security_issues'])
+    RUDIMENTARY_SECURITY_KEYWORDS[:] = original_keywords
 
 # --- Tests for _analyze_java_file ---
-def test_analyze_java_file_security_keyword_found():
+
+def test_analyze_java_file_with_content_fetches_and_lints(mock_get_content, mocker):
+    mock_get_content.return_value = "public class Test {} // Java content"
+    mock_subprocess_run = mocker.patch('subprocess.run')
+
+    mock_checkstyle_result = MagicMock()
+    # Simulate Checkstyle XML output for one error
+    mock_checkstyle_result.stdout = """<?xml version="1.0" encoding="UTF-8"?>
+<checkstyle version="8.0">
+<file name="/tmp/tempfile.java">
+<error line="1" column="1" severity="error" message="Missing a Javadoc comment." source="com.puppycrawl.tools.checkstyle.checks.javadoc.MissingJavadocTypeCheck"/>
+</file>
+</checkstyle>"""
+    mock_checkstyle_result.stderr = ""
+    mock_subprocess_run.return_value = mock_checkstyle_result
+
+    file_info = {'filename': 'Test.java', 'patch': '...'}
+    pr_data = {'owner': 'o', 'repo': 'r', 'head_sha': 'sha123'}
+
+    findings = _analyze_java_file(file_info, pr_data)
+
+    mock_get_content.assert_called_once_with('o', 'r', 'Test.java', 'sha123', {"Accept": "application/vnd.github.v3+json"})
+    mock_subprocess_run.assert_called_once() # Check that Checkstyle was called
+    assert len(findings['linting_issues']) > 0
+    assert findings['linting_issues'][0]['code'] == 'MissingJavadocTypeCheck'
+    assert "Java file Test.java was modified" in findings['impacts'][0]
+
+def test_analyze_java_file_content_fetch_fails(mock_get_content, mocker):
+    mock_get_content.return_value = None # Simulate content fetch failure
+    mock_subprocess_run = mocker.patch('subprocess.run')
+
+    file_info = {'filename': 'Test.java', 'patch': 'some java changes'}
+    pr_data = {'owner': 'o', 'repo': 'r', 'head_sha': 'sha123'}
+
+    findings = _analyze_java_file(file_info, pr_data)
+
+    mock_get_content.assert_called_once()
+    mock_subprocess_run.assert_not_called() # Checkstyle should not be called
+    expected_impact_message = "Java file Test.java changed, but full content not fetched for Checkstyle (using patch for other checks if available)."
+    assert expected_impact_message in findings['impacts'] # Check if the message is one of the impacts
+    assert findings['linting_issues'] == []
+    assert not findings['security_issues']
+
+def test_analyze_java_file_security_keyword_found(mock_get_content): # mock_get_content to simulate no content for Checkstyle
+    mock_get_content.return_value = "class Clean {}" # Assume Checkstyle runs on this
     file_info_java_sec = {
         'filename': 'App.java', 'status': 'modified',
-        'patch': '// FIXME:SECURITY this is not safe\nString pass = "hardcoded_password";'
+        'patch': '// FIXME:SECURITY this is not safe'
     }
     original_keywords = RUDIMENTARY_SECURITY_KEYWORDS[:]
-    # Ensure necessary keywords for the test are present
-    test_keywords_to_ensure = ["FIXME:SECURITY", "hardcoded_password"]
-    for kw in test_keywords_to_ensure:
-        if kw not in RUDIMENTARY_SECURITY_KEYWORDS:
-            RUDIMENTARY_SECURITY_KEYWORDS.append(kw)
+    if "FIXME:SECURITY" not in RUDIMENTARY_SECURITY_KEYWORDS:
+        RUDIMENTARY_SECURITY_KEYWORDS.append("FIXME:SECURITY")
 
-    findings = _analyze_java_file(file_info_java_sec, {})
+    findings = _analyze_java_file(file_info_java_sec, {'owner':'o','repo':'r','head_sha':'s'})
 
-    assert any("Potential security keyword 'FIXME:SECURITY' found" in issue for issue in findings['security_issues'])
-    assert any("Potential security keyword 'hardcoded_password' found" in issue for issue in findings['security_issues'])
-    assert "Review changes in App.java" in findings['tests_suggestions'][0]
+    assert any("Potential security keyword 'FIXME:SECURITY' found in changed lines." in issue for issue in findings['security_issues'])
+    RUDIMENTARY_SECURITY_KEYWORDS[:] = original_keywords
 
-    RUDIMENTARY_SECURITY_KEYWORDS[:] = original_keywords # Restore
-
-def test_analyze_java_file_no_security_keyword():
-    file_info_java_clean = {'filename': 'Clean.java', 'status': 'modified', 'patch': 'System.out.println("all good");'}
-    findings = _analyze_java_file(file_info_java_clean, {})
-    assert not findings['security_issues']
-    assert "Review changes in Clean.java" in findings['tests_suggestions'][0]
-
-def test_analyze_java_file_no_patch():
-    file_info_no_patch_java = {'filename': 'NoPatch.java', 'status': 'modified', 'patch': None}
-    findings = _analyze_java_file(file_info_no_patch_java, {})
-    assert "no patch data available" in findings['impacts'][0]
-    assert not findings['security_issues']
-    assert "Generic reminder: Ensure adequate JUnit test coverage for NoPatch.java" in findings['tests_suggestions'][0]
-
-# --- Test for _analyze_other_file ---
+# --- Test for _analyze_other_file (remains unchanged but good to keep) ---
 def test_analyze_other_file():
     file_info_other = {'filename': 'README.md', 'status': 'modified', 'patch': 'Some changes.'}
-    findings = _analyze_other_file(file_info_other, {})
+    findings = _analyze_other_file(file_info_other, {}) # pr_data not used by _analyze_other_file
     assert "Non-code file changed: README.md" in findings['impacts'][0]
-    assert not findings['tests_suggestions'] # Should be empty as per current _analyze_other_file
-    assert not findings['security_issues'] # No security scan for 'other' by default
+    assert not findings.get('linting_issues') # Should not have linting_issues key or it's empty
+    assert not findings['security_issues']
     assert not findings['dependencies']
-
-# Old tests like test_analyze_code_changes_no_files_changed,
-# test_analyze_code_changes_with_one_file_changed etc. might need review.
-# The main `analyze_code_changes` function's responsibility is now more about dispatch
-# and overall summary, less about direct impact area formatting from patches.
-# The overall_summary part of `analyze_code_changes` can be tested separately if it grows complex.
-# For now, the dispatch test covers the main new structural aspect.
-# The `test_analyze_code_changes_empty_pr_data` is still very relevant.

@@ -3,6 +3,10 @@
 import ast
 import re # For parsing line numbers from patch
 import javalang # Added for Java analysis
+import subprocess
+import tempfile
+import os
+import xml.etree.ElementTree as ET # Added for Checkstyle XML parsing
 
 # Rudimentary security keywords to scan for in patches
 RUDIMENTARY_SECURITY_KEYWORDS = [
@@ -16,280 +20,256 @@ RUDIMENTARY_SECURITY_KEYWORDS = [
     "SECRET_KEY =",
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
-    # Consider adding more, but be mindful of false positives.
-    # Example: "eval(", "exec(", "dangerouslySetInnerHTML" (for JS/React if ever supported)
 ]
 
-# Placeholder for future Python AST analysis
+# Import for fetching file content
+if __package__ is None or __package__ == '':
+    import sys
+    from pathlib import Path
+    project_root = Path(__file__).resolve().parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.append(str(project_root))
+    from src.pr_parser import get_file_content_at_ref
+else:
+    from .pr_parser import get_file_content_at_ref
+
+DEFAULT_CHECKSTYLE_CONFIG = os.path.normpath(os.path.join(
+    os.path.dirname(__file__), '..', 'config', 'google_checks.xml'
+))
+
+def _parse_flake8_output(output_str: str, original_filename: str) -> list:
+    linting_issues = []
+    for line in output_str.splitlines():
+        match = re.match(r"^[^:]+:([0-9]+):([0-9]+): ([A-Z][0-9]+) (.*)$", line)
+        if match:
+            linting_issues.append({
+                "file": original_filename, "line": int(match.group(1)),
+                "column": int(match.group(2)), "code": match.group(3),
+                "message": match.group(4).strip()
+            })
+        elif line.strip():
+            linting_issues.append({
+                "file": original_filename, "line": 0, "column": 0,
+                "code": "FLAKE8_PARSE_ERROR", "message": f"Unparseable Flake8 output line: {line.strip()}"
+            })
+    return linting_issues
+
+def _parse_checkstyle_xml_output(xml_str: str, original_filename: str) -> list:
+    linting_issues = []
+    if not xml_str: return linting_issues
+    try:
+        root = ET.fromstring(xml_str)
+        for file_node in root.findall('file'):
+            for error_node in file_node.findall('error'):
+                try:
+                    linting_issues.append({
+                        "file": original_filename,
+                        "line": int(error_node.get('line', '0')),
+                        "column": int(error_node.get('column', '0')),
+                        "code": error_node.get('source', '').split('.')[-1] or 'CheckstyleError',
+                        "message": error_node.get('message', 'No message'),
+                        "severity": error_node.get('severity', 'info')
+                    })
+                except ValueError as ve:
+                    linting_issues.append({
+                        "file": original_filename, "line": 0, "column": 0, "code": "PARSE_ERROR",
+                        "message": f"Error parsing Checkstyle error node: {ve}. Node: {ET.tostring(error_node, encoding='unicode')}"
+                    })
+    except ET.ParseError as e:
+        linting_issues.append({
+            "file": original_filename, "line": 0, "column": 0, "code": "XML_PARSE_ERROR",
+            "message": f"Failed to parse Checkstyle XML output: {e}"
+        })
+    return linting_issues
+
 def _analyze_python_file(file_info, pr_data):
-    """Analyzes a single Python file."""
+    filename = file_info.get('filename')
     findings = {
-        'file_path': file_info.get('filename'),
-        'language': 'python',
-        'impacts': [], # Specific impacts related to this file
-        'dependencies': [], # e.g., changed functions/classes used by others
-        'tests_suggestions': [], # Specific test ideas
-        'security_issues': [], # Python-specific security findings
-        'raw_analysis_data': {} # For more complex data if needed later
+        'file_path': filename, 'language': 'python', 'impacts': [],
+        'dependencies': [], 'tests_suggestions': [], 'security_issues': [],
+        'linting_issues': [], 'raw_analysis_data': {}
     }
 
-    filename = file_info.get('filename')
-    patch_text = file_info.get('patch')
-    findings['impacts'] = [] # Reset default impact
+    owner = pr_data.get('owner')
+    repo = pr_data.get('repo')
+    head_sha = pr_data.get('head_sha')
+    file_content = None
 
-    if not patch_text:
-        findings['impacts'].append(f"Python file {filename} changed, but no patch data available for AST analysis in this pass.")
-        # Keep the generic test suggestion if no patch is available
-        findings['tests_suggestions'].append(f"Consider adding/updating unit tests for changes in {filename}.")
-        return findings
-
-    # Helper to get line numbers from hunk headers (e.g., "@@ -15,7 +15,9 @@")
-    def get_changed_line_ranges(patch_text):
-        ranges = []
-        for line in patch_text.splitlines():
-            if line.startswith("@@"):
-                match = re.search(r"\+([0-9]+)(?:,([0-9]+))?", line)
-                if match:
-                    start_line = int(match.group(1))
-                    length = int(match.group(2) or 1) # if length is not there, it's 1 line
-                    if length == 0: # In some diffs, ,0 means no lines on this side (e.g. empty file added then content added)
-                                    # or when a file is deleted, the + side might be x,0
-                        # For our purpose, we care about lines on the '+' side that exist.
-                        # A length of 0 on the '+' side in a hunk usually means nothing was added there,
-                        # or it's the context before a deletion.
-                        # We are interested in lines that *are* in the new version.
-                        # If length is 0, it implies no lines from the "new" file in that part of the hunk.
-                        # We can skip these or handle them if we want to mark deletion points.
-                        # For now, we'll focus on hunks that add/modify lines.
-                        if length > 0 : # Only consider if new lines are present
-                           ranges.append((start_line, length))
-                    else:
-                        ranges.append((start_line, length))
-        return ranges
-
-    changed_line_info = get_changed_line_ranges(patch_text) # List of (start_line, num_lines) for additions/modifications
-
-    # --- Attempt to get full file content (Simulated for now) ---
-    # This is where we would ideally fetch the full content of the file from the PR's head.
-    # For now, we'll simulate having it or acknowledge this limitation.
-    # If we had the full file content as `file_content_str`:
-    # try:
-    #     tree = ast.parse(file_content_str)
-    # except SyntaxError as e:
-    #     findings['impacts'].append(f"Could not parse Python file {filename} due to SyntaxError: {e}")
-    #     return findings
-    # ---- End Simulation ----
-
-    # For this subtask, we cannot parse the full file yet as it's not fetched.
-    # We will simulate finding function/class defs and checking if their
-    # line numbers (if we had them from a full AST) overlap with `changed_line_info`.
-    # This is a placeholder for true AST analysis of the full file.
-
-    findings['impacts'].append(f"Python file {filename} was modified. (Status: {file_info.get('status', 'N/A')})") # General impact
-    findings['tests_suggestions'] = [] # Clear placeholder from initial setup
-
-    # Simulate finding function/class definitions and checking against patch lines
-    # This is highly simplified due to not having the full AST of the actual file.
-    # A real implementation would parse the full file, then iterate `ast.walk(tree)`.
-
-    # Example of how one might check if a definition is affected by changes:
-    # Assume we found a function `def example_func():` at line 50, ending line 55 (from full file AST)
-    # func_start_line, func_end_line = 50, 55
-    # for change_start, change_length in changed_line_info:
-    #   change_end = change_start + change_length -1 # 0-length changes won't make sense here
-    #   if change_length > 0 and max(func_start_line, change_start) <= min(func_end_line, change_end):
-    #       findings['tests_suggestions'].append(f"Function/Class 'example_func' (lines {func_start_line}-{func_end_line}) seems affected by changes. Review and test.")
-    #       break
-
-    # Since we can't do the above properly yet, add a more generic suggestion based on patch presence
-    if changed_line_info:
-        findings['tests_suggestions'].append(f"Changes detected in {filename} (affected code hunks: {len(changed_line_info)}). Consider specific unit tests for modified logic.")
-        findings['dependencies'].append(f"Review changes in {filename} for potential impacts on dependent modules or functions (manual check for now).")
-    else: # No changed lines info from patch, or patch was empty
-        findings['tests_suggestions'].append(f"Patch data for {filename} did not yield specific line change information for targeted testing suggestions. Review changes broadly.")
-
-
-    # Placeholder for actual signature change detection
-    # findings['dependencies'].append("If function signatures changed, update call sites.")
-
-    # Placeholder for AST-based security checks (very basic example)
-    # A real check would parse code and look for specific AST patterns.
-    # For example, looking for `call` nodes where `id` is `eval`.
-    # if "eval(" in patch_text: # Super naive check, prone to false positives/negatives
-    #    findings['security_issues'].append(f"Potential use of 'eval' detected in changes in {filename}. Review carefully for security implications.")
-
-    # Rudimentary security keyword scan
-    if patch_text:
-        for keyword in RUDIMENTARY_SECURITY_KEYWORDS:
-            if keyword in patch_text: # Simple substring check
-                findings['security_issues'].append(
-                    f"Potential security keyword '{keyword}' found in changes."
-                )
-        # Optional: Add a note if no keywords found - usually only report if an issue is found.
-        # if not findings['security_issues']:
-        #     findings['security_issues'].append("No obvious rudimentary security keywords found in patch.")
-
-    if not findings['tests_suggestions']: # Fallback if no other specific test suggestions were added
-         findings['tests_suggestions'].append(f"Generic reminder: Ensure adequate test coverage for {filename}.")
-
-    return findings # Return the findings dictionary
-
-# Placeholder for future Java analysis
-def _analyze_java_file(file_info, pr_data):
-    """Analyzes a single Java file."""
-    findings = {
-        'file_path': file_info.get('filename'),
-        'language': 'java',
-        'impacts': [],
-        'dependencies': [],
-        'tests_suggestions': [],
-        'security_issues': [],
-        'raw_analysis_data': {}
-    }
-    filename = file_info.get('filename')
-    patch_text = file_info.get('patch') # May be None
-    findings['impacts'] = [] # Reset default impact
-    findings['tests_suggestions'] = [] # Clear placeholder
-
-    # --- Full file content needed for javalang parsing ---
-    # This is where we would ideally have the full content of the Java file.
-    # For now, we acknowledge this limitation.
-    # Example: file_content_str = fetch_full_java_file_content(filename, pr_data)
-    #
-    # if file_content_str:
-    #     try:
-    #         tree = javalang.parse.parse(file_content_str)
-    #         findings['impacts'].append(f"Successfully parsed Java file {filename} (basic structure).")
-    #
-    #         for path, node in tree:
-    #             if isinstance(node, javalang.tree.ClassDeclaration):
-    #                 findings['impacts'].append(f"Found class declaration: {node.name}")
-    #                 # Check if this class's line numbers overlap with patch changes
-    #             elif isinstance(node, javalang.tree.MethodDeclaration):
-    #                 findings['tests_suggestions'].append(f"Method found: {node.name}. Consider JUnit tests if new or modified.")
-    #
-    #     except javalang.parser.JavaSyntaxError as e:
-    #         findings['impacts'].append(f"Could not parse Java file {filename} due to SyntaxError: {e.message}")
-    #     except Exception as e:
-    #         findings['impacts'].append(f"Error during basic javalang parsing of {filename}: {str(e)}")
-    # else:
-    #     findings['impacts'].append(f"Java file {filename} changed, but full content not available for javalang analysis in this pass.")
-    # ---- End Simulation of javalang parsing ----
-
-    # For this subtask, as full content fetching is not yet implemented,
-    # provide generic feedback based on patch presence.
-    if patch_text:
-        findings['impacts'].append(f"Java file {filename} was modified (changes detected in patch). (Status: {file_info.get('status', 'N/A')})")
-        findings['tests_suggestions'].append(f"Review changes in {filename} and consider specific JUnit tests for modified logic.")
-        findings['dependencies'].append(f"Manual check: Review changes in {filename} for impacts on dependent Java classes or interfaces.")
+    if owner and repo and head_sha and filename:
+        api_headers = {"Accept": "application/vnd.github.v3+json"}
+        # TODO: Add GitHub token to headers
+        file_content = get_file_content_at_ref(owner, repo, filename, head_sha, api_headers)
     else:
-        findings['impacts'].append(f"Java file {filename} changed, but no patch data available for detailed review in this pass. (Status: {file_info.get('status', 'N/A')})")
+        findings['impacts'].append(f"Insufficient data to fetch full content for {filename}.")
+
+    if not file_content:
+        findings['impacts'].append(f"Python file {filename} changed, but full content not fetched for Flake8 (using patch for other checks if available).")
+    else: # Full content is available for Flake8
+        tmp_file_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as tmp_file:
+                tmp_file.write(file_content)
+                tmp_file_path = tmp_file.name
+            process = subprocess.run(
+                ['flake8', tmp_file_path], capture_output=True, text=True, check=False, encoding='utf-8'
+            )
+            findings['linting_issues'] = _parse_flake8_output(process.stdout, filename)
+            if process.stderr:
+                print(f"Flake8 stderr for {filename} (temp {tmp_file_path}): {process.stderr.strip()}")
+        except FileNotFoundError:
+            findings['impacts'].append(f"Flake8 command not found for {filename}.")
+        except Exception as e:
+            findings['impacts'].append(f"Error running Flake8 on {filename}: {str(e)}")
+        finally:
+            if tmp_file_path and os.path.exists(tmp_file_path):
+                os.remove(tmp_file_path)
+
+    # Patch-based analysis (complementary to full file linting)
+    patch_text = file_info.get('patch')
+    if patch_text:
+        findings['impacts'].append(f"Python file {filename} was modified (Status: {file_info.get('status', 'N/A')}).")
+
+        # Define helper for changed line ranges within this scope as it's only used here
+        def get_changed_line_ranges(patch_text_local):
+            ranges_local = []
+            for line_local in patch_text_local.splitlines():
+                if line_local.startswith("@@"):
+                    match_local = re.search(r"\+([0-9]+)(?:,([0-9]+))?", line_local)
+                    if match_local:
+                        start_line = int(match_local.group(1))
+                        length = int(match_local.group(2) or 1)
+                        if length > 0:
+                           ranges_local.append((start_line, length))
+            return ranges_local
+
+        changed_line_info = get_changed_line_ranges(patch_text)
+        if changed_line_info:
+            findings['tests_suggestions'].append(f"Changes detected in {filename} (hunks: {len(changed_line_info)}). Consider specific unit tests.")
+            findings['dependencies'].append(f"Review changes in {filename} for potential impacts on dependents (manual check).")
+        else:
+            findings['tests_suggestions'].append(f"Patch data for {filename} didn't yield specific line changes for targeted test suggestions.")
+
+        for keyword in RUDIMENTARY_SECURITY_KEYWORDS:
+            if keyword in patch_text:
+                findings['security_issues'].append(f"Potential security keyword '{keyword}' found in changed lines.")
+    else: # No patch text
+        findings['impacts'].append(f"Python file {filename} (Status: {file_info.get('status', 'N/A')}) processed (no patch data for detailed change analysis).")
+
+    if not findings['tests_suggestions'] and (findings['linting_issues'] or file_content): # If content was analyzed or linted
+        findings['tests_suggestions'].append(f"Review linting/analysis results for {filename} and ensure test coverage.")
+    elif not findings['tests_suggestions']: # Fallback if no content/linting and no patch-based suggestions
+        findings['tests_suggestions'].append(f"Generic reminder: Ensure adequate test coverage for {filename}.")
+
+    return findings
+
+def _analyze_java_file(file_info, pr_data):
+    filename = file_info.get('filename')
+    findings = {
+        'file_path': filename, 'language': 'java', 'impacts': [],
+        'dependencies': [], 'tests_suggestions': [], 'security_issues': [],
+        'linting_issues': [], 'raw_analysis_data': {}
+    }
+
+    owner = pr_data.get('owner')
+    repo = pr_data.get('repo')
+    head_sha = pr_data.get('head_sha')
+    file_content = None
+
+    if owner and repo and head_sha and filename:
+        api_headers = {"Accept": "application/vnd.github.v3+json"}
+        # TODO: Add GitHub token
+        file_content = get_file_content_at_ref(owner, repo, filename, head_sha, api_headers)
+    else:
+        findings['impacts'].append(f"Insufficient data to fetch full content for {filename}.")
+
+    if not file_content:
+        findings['impacts'].append(f"Java file {filename} changed, but full content not fetched for Checkstyle (using patch for other checks if available).")
+    else: # Full content available for Checkstyle
+        tmp_file_path = ""
+        checkstyle_jar_cmd = os.getenv("CHECKSTYLE_JAR", "checkstyle.jar")
+        config_file_path = DEFAULT_CHECKSTYLE_CONFIG
+        if not os.path.exists(config_file_path):
+            findings['impacts'].append(f"Checkstyle config not found: {config_file_path}")
+        else:
+            try:
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.java', delete=False, encoding='utf-8') as tmp_file:
+                    tmp_file.write(file_content)
+                    tmp_file_path = tmp_file.name
+                cmd = ['java', '-jar', checkstyle_jar_cmd, '-c', config_file_path, '-f', 'xml', tmp_file_path]
+                process = subprocess.run(cmd, capture_output=True, text=True, check=False, encoding='utf-8')
+                if process.stderr:
+                    print(f"Checkstyle stderr for {filename} (temp {tmp_file_path}): {process.stderr.strip()}")
+                if process.stdout:
+                    findings['linting_issues'] = _parse_checkstyle_xml_output(process.stdout, filename)
+                elif not process.stderr:
+                    findings['linting_issues'] = []
+            except FileNotFoundError:
+                findings['impacts'].append(f"Checkstyle/Java not found for {filename}. Ensure Java and Checkstyle JAR are accessible.")
+            except Exception as e:
+                findings['impacts'].append(f"Error running Checkstyle on {filename}: {str(e)}")
+            finally:
+                if tmp_file_path and os.path.exists(tmp_file_path):
+                    os.remove(tmp_file_path)
+
+    patch_text = file_info.get('patch')
+    if patch_text:
+        findings['impacts'].append(f"Java file {filename} was modified (Status: {file_info.get('status', 'N/A')}).")
+        findings['tests_suggestions'].append(f"Review changes in {filename} and consider specific JUnit tests.")
+        findings['dependencies'].append(f"Manual check: Review {filename} for impacts on dependents.")
+        for keyword in RUDIMENTARY_SECURITY_KEYWORDS:
+            if keyword in patch_text:
+                findings['security_issues'].append(f"Potential security keyword '{keyword}' found in changed lines.")
+    else:
+        findings['impacts'].append(f"Java file {filename} (Status: {file_info.get('status', 'N/A')}) processed (no patch data for detailed change analysis).")
+
+    if not findings['tests_suggestions'] and (findings['linting_issues'] or file_content):
+        findings['tests_suggestions'].append(f"Review linting/analysis results for {filename} and ensure test coverage.")
+    elif not findings['tests_suggestions']:
         findings['tests_suggestions'].append(f"Generic reminder: Ensure adequate JUnit test coverage for {filename}.")
 
-    # Rudimentary security keyword scan
-    if patch_text:
-        for keyword in RUDIMENTARY_SECURITY_KEYWORDS:
-            if keyword in patch_text: # Simple substring check
-                findings['security_issues'].append(
-                    f"Potential security keyword '{keyword}' found in changes."
-                )
-        # Optional: Add a note if no keywords found
-        # if not findings['security_issues']:
-        #     findings['security_issues'].append("No obvious rudimentary security keywords found in patch.")
+    return findings
 
-    return findings # Return the findings dictionary
-
-# Placeholder for other file types
 def _analyze_other_file(file_info, pr_data):
-    """Analyzes other file types (e.g., markdown, text)."""
     findings = {
-        'file_path': file_info.get('filename'),
-        'language': 'other',
+        'file_path': file_info.get('filename'), 'language': 'other',
         'impacts': [f"Non-code file changed: {file_info['filename']} (Status: {file_info.get('status', 'N/A')})"],
-        'dependencies': [],
-        'tests_suggestions': [],
-        'security_issues': [],
-        'raw_analysis_data': {}
+        'dependencies': [], 'tests_suggestions': [], 'security_issues': [],
+        'linting_issues': [], 'raw_analysis_data': {} # Added linting_issues for consistency
     }
     return findings
 
-
 def analyze_code_changes(pr_data):
-    """
-    Analyzes the code changes in a PR to identify impact areas,
-    suggest code reuse, and lint for SOLID design patterns.
-    This version dispatches to language-specific analyzers.
-
-    Args:
-        pr_data (dict): A dictionary containing PR details,
-                        especially 'files_changed'.
-
-    Returns:
-        dict: An aggregated dictionary of analysis results.
-              Example: {
-                  'overall_summary': {
-                      'reuse_suggestions': [],
-                      'solid_violations': [],
-                      'general_security_reminders': []
-                  },
-                  'file_specific_findings': [
-                      # list of findings dicts from _analyze_python_file, _analyze_java_file etc.
-                  ]
-              }
-    """
     if not pr_data or 'files_changed' not in pr_data:
         print("Error: Invalid PR data provided for analysis in analyze_code_changes.")
         return {
-            'overall_summary': {
-                'reuse_suggestions': [],
-                'solid_violations': [],
-                'general_security_reminders': []
-            },
+            'overall_summary': {'reuse_suggestions': [], 'solid_violations': [], 'general_security_reminders': []},
             'file_specific_findings': []
         }
 
     print(f"Analyzing PR (multi-language): {pr_data.get('title', 'N/A')}")
-
     file_specific_findings_list = []
 
     for file_info in pr_data.get('files_changed', []):
         filename = file_info.get('filename', '')
-        # We need the actual file content for AST parsing, not just the patch.
-        # The 'patch' from GitHub API file details is useful, but for full AST,
-        # we'd typically fetch the file content at the PR's head commit.
-        # This will be a consideration for the next steps when implementing AST.
-        # For now, dispatch based on filename. 'patch' key check remains for impact areas.
-
-        if not filename: # Should not happen if GitHub API data is valid
-            continue
+        if not filename: continue
 
         if filename.endswith('.py'):
             findings = _analyze_python_file(file_info, pr_data)
-            file_specific_findings_list.append(findings)
         elif filename.endswith('.java'):
             findings = _analyze_java_file(file_info, pr_data)
-            file_specific_findings_list.append(findings)
         else:
-            # For .md, .txt, or other non-code files, or files not yet supported
             findings = _analyze_other_file(file_info, pr_data)
-            file_specific_findings_list.append(findings)
+        file_specific_findings_list.append(findings)
 
-    # Placeholder for overall analysis (reuse, SOLID) - can be enhanced later
     overall_reuse_suggestions = []
     if len(pr_data.get('files_changed', [])) > 1:
         overall_reuse_suggestions.append("Consider if there are common patterns across the changed files that could be abstracted globally.")
-
     overall_solid_violations = ["Reminder: Review all code changes for adherence to SOLID principles."]
-
-    # This general security reminder might be superseded or enhanced by file-specific ones later
     general_security_reminders = []
-    # Check if any of the processed files are Python or Java to add a general reminder
     if any(f_item.get('language') in ['python', 'java'] for f_item in file_specific_findings_list):
          general_security_reminders.append("Overall Security Reminder: Review changes for potential security vulnerabilities (e.g., input validation, proper auth).")
 
-
     print("Code analysis complete (multi-language dispatch structure).")
-
     return {
         'overall_summary': {
             'reuse_suggestions': overall_reuse_suggestions,
@@ -300,29 +280,38 @@ def analyze_code_changes(pr_data):
     }
 
 if __name__ == '__main__':
-    # Example Usage (with mock data for now)
+    # Example Usage (with mock data for now) - Ensure pr_data includes owner, repo, head_sha for testing
     mock_pr_data_py = {
-        'title': 'Test PR - Python Changes',
+        'title': 'Test PR - Python Changes', 'owner': 'testowner', 'repo': 'testrepo', 'head_sha': 'testsha',
         'files_changed': [
-            {'filename': 'src/module_a/file1.py', 'status': 'modified', 'patch': '...'},
-            {'filename': 'docs/README.md', 'status': 'modified', 'patch': '...'}
+            {'filename': 'src/module_a/file1.py', 'status': 'modified', 'patch': "print('hello')\n# TODO:SECURITY this is a test"},
+            {'filename': 'docs/README.md', 'status': 'modified', 'patch': 'Updated docs'}
         ]
     }
     analysis_results_py = analyze_code_changes(mock_pr_data_py)
     print("\nPython PR Analysis Results:")
     print(f"Overall: {analysis_results_py['overall_summary']}")
     for finding in analysis_results_py['file_specific_findings']:
-        print(f"File ({finding['language']}): {finding['file_path']} - Impacts: {finding['impacts']}")
+        print(f"File ({finding['language']}): {finding['file_path']}")
+        for impact in finding['impacts']: print(f"  Impact: {impact}")
+        for lint_issue in finding.get('linting_issues',[]): print(f"  Lint: L{lint_issue['line']} {lint_issue['code']} {lint_issue['message']}")
+        for sec_issue in finding.get('security_issues',[]): print(f"  Security: {sec_issue}")
+        for test_sugg in finding.get('tests_suggestions',[]): print(f"  Test: {test_sugg}")
+
 
     mock_pr_data_java = {
-        'title': 'Test PR - Java Changes',
+        'title': 'Test PR - Java Changes', 'owner': 'testowner', 'repo': 'testrepo', 'head_sha': 'testsha',
         'files_changed': [
-            {'filename': 'com/example/Main.java', 'status': 'added', 'patch': '...'},
-            {'filename': 'com/example/Util.java', 'status': 'modified', 'patch': '...'},
+            {'filename': 'com/example/Main.java', 'status': 'added', 'patch': 'public class Main {硬编码密码 secret_key = "test"; }'},
+            {'filename': 'com/example/Util.java', 'status': 'modified', 'patch': '// A util class'},
         ]
     }
     analysis_results_java = analyze_code_changes(mock_pr_data_java)
     print("\nJava PR Analysis Results:")
     print(f"Overall: {analysis_results_java['overall_summary']}")
     for finding in analysis_results_java['file_specific_findings']:
-        print(f"File ({finding['language']}): {finding['file_path']} - Impacts: {finding['impacts']}")
+        print(f"File ({finding['language']}): {finding['file_path']}")
+        for impact in finding['impacts']: print(f"  Impact: {impact}")
+        for lint_issue in finding.get('linting_issues',[]): print(f"  Lint: L{lint_issue['line']} {lint_issue['code']} {lint_issue['message']}")
+        for sec_issue in finding.get('security_issues',[]): print(f"  Security: {sec_issue}")
+        for test_sugg in finding.get('tests_suggestions',[]): print(f"  Test: {test_sugg}")
