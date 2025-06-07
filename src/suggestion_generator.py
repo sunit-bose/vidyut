@@ -12,7 +12,7 @@ def generate_suggestions(analysis_results):
     Returns:
         list: A list of strings, where each string is a suggestion.
     """
-    if not analysis_results:
+    if analysis_results is None: # Explicitly check for None
         print("Error: No analysis results provided for suggestion generation.")
         return []
 

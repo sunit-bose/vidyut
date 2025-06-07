@@ -85,8 +85,7 @@ if __name__ == '__main__':
     #     print(f"Files changed: {len(details['files_changed'])}")
     #     for file_detail in details['files_changed']:
     #         print(f"  - {file_detail['filename']} ({file_detail['status']})")
-    #     # print(f"Diff:
-{details['diff'][:500]}...") # Print first 500 chars of diff
+    #     # print(f"Diff preview: {details['diff'][:500]}") # Example: Print first 500 chars of diff
     # else:
     #     print("Could not retrieve PR details.")
     pass

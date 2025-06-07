@@ -73,9 +73,9 @@ if __name__ == '__main__':
                 'status': 'modified',
                 'additions': 10,
                 'deletions': 2,
-                'patch': '@@ -1,1 +1,1 @@
+                'patch': """@@ -1,1 +1,1 @@
 -old line
-+new line'
++new line"""
             },
             {
                 'filename': 'module_b/file2.py',
