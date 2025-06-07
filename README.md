@@ -4,19 +4,21 @@
 
 ## Overview
 
-This project is an AI-powered agent designed to assist developers and teams by automating parts of the Pull Request (PR) review process. It fetches PR details from GitHub, performs a basic analysis of the changes, and offers suggestions related to potential impact areas, code reuse, design patterns (SOLID), unit tests, and security considerations. The agent is run via a command-line interface (CLI) and can process multiple PRs concurrently.
+This project is an AI-powered agent designed to assist developers and teams by automating parts of the Pull Request (PR) review process. It fetches PR details from GitHub, performs an initial analysis of the changes (with foundational support for Python and Java), and offers suggestions related to potential impact areas, code reuse, design patterns (SOLID), unit tests, and security considerations. The agent is run via a command-line interface (CLI) and can process multiple PRs concurrently.
 
-The goal is to provide helpful insights to reviewers and authors, streamline the review cycle, and improve code quality over time. While currently in its initial phase with placeholder analysis logic, the long-term vision is to build a more sophisticated and configurable review assistant.
+The goal is to provide helpful insights to reviewers and authors, streamline the review cycle, and improve code quality over time. While currently in its initial phase with foundational analysis logic, the long-term vision is to build a more sophisticated and configurable review assistant.
 
 ## Current Features (Phase 1)
 
 *   Fetches PR details (title, description, author, changed files, diffs) from GitHub.
 *   Accepts multiple PR URLs for concurrent processing.
-*   Performs placeholder analysis for:
+*   Initial support for analyzing Python and Java files, alongside generic handling for other file types.
+*   Rudimentary security keyword scanning in Python and Java code patches (e.g., for 'TODO:SECURITY', 'hardcoded_password').
+*   Performs foundational analysis for:
     *   Identifying modified files as impact areas.
-    *   Basic suggestions for code reuse if multiple files are changed.
-    *   Reminders for SOLID design principles.
-*   Generates a list of suggestions, including general reminders for unit testing and security.
+    *   Basic suggestions for code reuse if multiple files are changed (overall summary).
+    *   Reminders for SOLID design principles (overall summary).
+*   Generates a list of suggestions, including general reminders for unit testing and security, plus file-specific points.
 *   Command-line interface (CLI) to initiate reviews and display results.
 *   Basic unit test coverage for core modules.
 
@@ -26,6 +28,7 @@ The goal is to provide helpful insights to reviewers and authors, streamline the
 *   `requests`: For making HTTP requests to the GitHub API.
 *   `pytest`: For unit testing.
 *   `pytest-mock`: For mocking in tests.
+*   `javalang`: For basic parsing of Java code structure (foundational).
 
 ## Prerequisites
 
