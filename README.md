@@ -19,8 +19,17 @@ The goal is to provide helpful insights to reviewers and authors, streamline the
     *   Provides **specific dependency notes** highlighting the signatures and locations of these new/modified Python definitions.
     *   Generates **targeted unit test suggestions** for these specific new/modified functions, classes, and methods.
 *   **Static analysis and foundational support for Java files:**
-    *   Checkstyle integration for linting, operating on full file content.
+    *   Checkstyle integration for linting against Google's Java Style Guide (default configuration at `config/google_checks.xml`), operating on full file content. This helps identify style violations and potential code quality issues.
     *   Basic structure awareness with general suggestions.
+    *   An example of a Checkstyle linting suggestion you might see:
+      ```
+      --- File: com/example/MyClass.java (java) ---
+        ...
+        Linting Issues (java - Checkstyle):
+          L15:C5 [MethodNameCheck] Name 'MyMethod' must match pattern '^[a-z][a-zA-Z0-9]*$'. (Severity: error)
+          L20 [LineLengthCheck] Line is longer than 100 characters (found 120). (Severity: warning)
+        ...
+      ```
 *   Rudimentary security keyword scanning in Python and Java code patches (e.g., for 'TODO:SECURITY', 'hardcoded_password').
 *   Generic handling for other file types (e.g., Markdown, text).
 *   Performs foundational analysis for overall PR context:
@@ -73,13 +82,12 @@ The goal is to provide helpful insights to reviewers and authors, streamline the
 
 To enable Java linting with Checkstyle, you need to have the following set up in your environment:
 
-1.  **Java Runtime Environment (JRE):** A JRE (version 8 or higher recommended) must be installed and its `java` command accessible.
+1.  **Java Runtime Environment (JRE):** A JRE (version 8 or higher is generally recommended) must be installed and its `java` command must be accessible via the system's PATH.
 2.  **Checkstyle JAR:** Download the Checkstyle JAR file (e.g., `checkstyle-X.Y-all.jar`). You can find the latest releases on the [Checkstyle GitHub releases page](https://github.com/checkstyle/checkstyle/releases).
-    *   The agent attempts to run Checkstyle by invoking `java -jar <path_to_checkstyle.jar> ...`.
-    *   You can make the Checkstyle JAR accessible by:
-        *   Placing it in a directory that's part of your system's `PATH` and renaming the JAR to `checkstyle.jar`.
-        *   Setting the `CHECKSTYLE_JAR` environment variable to the full path of the JAR file (e.g., `export CHECKSTYLE_JAR=/path/to/your/checkstyle-10.3.2-all.jar`).
-3.  **Configuration:** The agent includes a default Checkstyle configuration based on Google's Java Style Guide, located at `config/google_checks.xml`. For custom checks, you would modify this file or use a mechanism (to be implemented in future versions) to specify a custom configuration file path.
+    *   The agent attempts to run Checkstyle by invoking `java -jar <checkstyle_jar_command> ...`. The `<checkstyle_jar_command>` is determined as follows:
+        *   If the `CHECKSTYLE_JAR` environment variable is set to the full path of the JAR file (e.g., `export CHECKSTYLE_JAR=/path/to/your/checkstyle-10.3.2-all.jar`), that path will be used.
+        *   Otherwise, the agent will attempt to use the command `checkstyle.jar`, assuming the JAR file has been renamed to `checkstyle.jar` and placed in a directory included in your system's `PATH`.
+3.  **Configuration:** The agent uses a default Checkstyle configuration based on Google's Java Style Guide, located at `config/google_checks.xml`. For custom checks, you would need to modify this file or (in future versions) use a mechanism to specify a custom configuration file path.
 
 ## Usage
 

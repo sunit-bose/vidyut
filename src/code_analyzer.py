@@ -218,7 +218,6 @@ def _analyze_python_file(file_info, pr_data):
                 f"AST parsed {len(definitions_from_ast)} Python definitions in {filename}, but none appear directly in changed code lines based on patch."
             )
 
-    # Generate dependency notes (includes filename now)
     findings['dependencies'] = []
     for definition_info in findings.get('python_definitions', []):
         name = definition_info['name']
@@ -242,7 +241,6 @@ def _analyze_python_file(file_info, pr_data):
         dependency_note = f"{change_verb} {description}. Review its usage and potential impacts on callers or dependent components."
         findings['dependencies'].append(dependency_note)
 
-    # Generate specific test suggestions
     findings['tests_suggestions'] = []
     for definition_info in findings.get('python_definitions', []):
         name = definition_info['name']
@@ -266,7 +264,6 @@ def _analyze_python_file(file_info, pr_data):
         if suggestion_text:
             findings['tests_suggestions'].append(suggestion_text)
 
-    # Fallback test suggestions
     if not findings['tests_suggestions']:
         if changed_line_info:
             findings['tests_suggestions'].append(
@@ -280,9 +277,9 @@ def _analyze_python_file(file_info, pr_data):
             findings['tests_suggestions'].append(f"Review linting issues for {filename} and ensure test coverage for overall changes.")
         elif file_content :
              findings['tests_suggestions'].append(f"Generic reminder: Ensure adequate test coverage for changes in {filename}.")
-        elif not file_content and patch_text: # No content, but patch exists
+        elif not file_content and patch_text:
              findings['tests_suggestions'].append(f"Full content not analyzed for {filename}. Review patch changes and ensure test coverage.")
-        else: # No content, no patch
+        else:
             findings['tests_suggestions'].append(f"No content or patch data for {filename} to provide specific test suggestions. Review file status and ensure coverage if it's part of PR.")
 
     return findings
@@ -319,7 +316,7 @@ def _analyze_java_file(file_info, pr_data):
         checkstyle_jar_cmd = os.getenv("CHECKSTYLE_JAR", "checkstyle.jar")
         config_file_path = DEFAULT_CHECKSTYLE_CONFIG
         if not os.path.exists(config_file_path):
-            findings['impacts'].append(f"Checkstyle config not found: {config_file_path}")
+            findings['impacts'].append(f"Checkstyle config file not found at {config_file_path} for {filename}.")
         else:
             try:
                 with tempfile.NamedTemporaryFile(mode='w', suffix='.java', delete=False, encoding='utf-8') as tmp_file:
@@ -327,14 +324,27 @@ def _analyze_java_file(file_info, pr_data):
                     tmp_file_path = tmp_file.name
                 cmd = ['java', '-jar', checkstyle_jar_cmd, '-c', config_file_path, '-f', 'xml', tmp_file_path]
                 process = subprocess.run(cmd, capture_output=True, text=True, check=False, encoding='utf-8')
-                if process.stderr:
-                    print(f"Checkstyle stderr for {filename} (temp {tmp_file_path}): {process.stderr.strip()}")
+
+                stderr_output = process.stderr.strip()
+                if stderr_output:
+                    print(f"Checkstyle stderr for {filename} (temp {tmp_file_path}): {stderr_output}")
+                    # Heuristic for operational error
+                    if "Exception" in stderr_output or "Error" in stderr_output or "Could not" in stderr_output:
+                        findings['impacts'].append(
+                            f"Checkstyle encountered an operational error for {filename} (see console logs). " +
+                            "This may indicate a configuration issue with Checkstyle, Java, or the Checkstyle JAR."
+                        )
+
                 if process.stdout:
                     findings['linting_issues'] = _parse_checkstyle_xml_output(process.stdout, filename)
-                elif not process.stderr:
+                elif not stderr_output: # No stdout and no stderr -> assume no issues found
                     findings['linting_issues'] = []
             except FileNotFoundError:
-                findings['impacts'].append(f"Checkstyle/Java not found for {filename}. Ensure Java and Checkstyle JAR are accessible.")
+                findings['impacts'].append(
+                   f"Checkstyle execution failed for {filename}. Ensure Java is installed and " +
+                   f"'{checkstyle_jar_cmd}' (Checkstyle JAR) is accessible. " +
+                   f"Set CHECKSTYLE_JAR environment variable or ensure '{checkstyle_jar_cmd}' is in system PATH."
+                )
             except Exception as e:
                 findings['impacts'].append(f"Error running Checkstyle on {filename}: {str(e)}")
             finally:
@@ -346,7 +356,7 @@ def _analyze_java_file(file_info, pr_data):
         if not any(f"Successfully parsed Java file {filename}" in imp for imp in findings['impacts']) and \
            not any(f"Could not parse Java file {filename}" in imp for imp in findings['impacts']):
             findings['impacts'].append(f"Java file {filename} was modified (Status: {file_info.get('status', 'N/A')}).")
-        current_test_suggestions = findings.get('tests_suggestions', []) # Keep any from linting phase
+        current_test_suggestions = findings.get('tests_suggestions', [])
         if not current_test_suggestions:
             current_test_suggestions.append(f"Review changes in {filename} and consider specific JUnit tests.")
         findings['tests_suggestions'] = current_test_suggestions
