@@ -1,4 +1,9 @@
 # src/suggestion_generator.py
+from src.code_analyzer import ( # For mock data in __main__
+    ANALYSIS_PYTHON_AST, ANALYSIS_FLAKE8, ANALYSIS_JAVA_CHECKSTYLE,
+    ANALYSIS_SECURITY_KEYWORD_SCAN, ANALYSIS_PYTHON_TEST_STUB_GEN,
+    ANALYSIS_JAVA_PARSER, ANALYSIS_MAVEN_POM
+)
 
 def generate_suggestions(analysis_results):
     """
@@ -10,22 +15,20 @@ def generate_suggestions(analysis_results):
     Returns:
         list: A list of strings, where each string is a suggestion.
     """
-    if analysis_results is None: # Check for None specifically
+    if analysis_results is None:
         print("Error: No analysis results provided for suggestion generation.")
         return []
 
     suggestions = []
 
-    # Overall suggestions from summary
     overall_summary = analysis_results.get('overall_summary', {})
     for reuse_idea in overall_summary.get('reuse_suggestions', []):
         suggestions.append(f"Overall Code Reuse: {reuse_idea}")
     for violation in overall_summary.get('solid_violations', []):
         suggestions.append(f"Overall Design Pattern: {violation}")
     for reminder in overall_summary.get('general_security_reminders', []):
-        suggestions.append(reminder) # Already a full sentence
+        suggestions.append(reminder)
 
-    # File-specific suggestions
     file_findings = analysis_results.get('file_specific_findings', [])
 
     if not file_findings and not suggestions:
@@ -73,21 +76,28 @@ def generate_suggestions(analysis_results):
                         target_type = stub_info.get('target_definition_type', 'definition')
                         suggested_file = stub_info.get('suggested_test_filename', 'N/A')
                         stub_code = stub_info.get('stub_code', '# No stub code generated.')
-
-                        suggestions.append(
-                            f"    - For new {target_type} `{target_name}` (in {file_path}):"
-                        )
-                        suggestions.append(
-                            f"      Suggested Test File: `{suggested_file}`"
-                        )
-                        suggestions.append(
-                            f"      Boilerplate Code:\n```python\n{stub_code}\n```"
-                        )
+                        suggestions.append(f"    - For new {target_type} `{target_name}` (in {file_path}):")
+                        suggestions.append(f"      Suggested Test File: `{suggested_file}`")
+                        suggestions.append(f"      Boilerplate Code:\n```python\n{stub_code}\n```")
                     suggestions.append("    (Note: These are basic stubs. Please review, adjust paths, and implement test logic.)")
 
+            # Check if no specific code-related suggestions were added for Python/Java
+            # (excluding impacts which are always shown if present)
             if not any([dependencies, tests_suggestions, security_issues, linting_issues,
-                        (python_test_stubs if language == 'python' else [])]):
+                        (finding.get('python_test_stubs') if language == 'python' else [])]):
                  suggestions.append(f"  No further specific code analysis suggestions for this {language} file in this phase.")
+
+        elif language == 'maven_pom': # New block for Maven POM
+            build_dep_changes = finding.get('build_dependency_changes', [])
+            if build_dep_changes:
+                suggestions.append(f"  Maven POM Dependency Changes/Observations:")
+                for change_note in build_dep_changes:
+                    suggestions.append(f"    - {change_note}")
+            # If impacts were already shown (e.g. "Parsed pom.xml") and no build_dep_changes,
+            # we might not need an additional message. Or, if build_dep_changes is empty
+            # but the analysis was run, we could add a "No specific dependency changes detected".
+            # For now, only add this section if build_dep_changes has content.
+            # The _analyze_maven_pom adds an impact if no deps are found, which is good.
 
         elif language == 'other':
             if not impacts:
@@ -107,14 +117,13 @@ if __name__ == '__main__':
         },
         'file_specific_findings': [
             {
-                'file_path': 'src/main.py',
-                'language': 'python',
+                'file_path': 'src/main.py', 'language': 'python',
                 'impacts': ['Python file src/main.py was modified significantly.'],
                 'dependencies': ['Dependency: `old_function` might be affected by changes to `new_function`.'],
                 'tests_suggestions': ['Testing: Add unit tests for new Python functions in src/main.py'],
                 'security_issues': ["Potential security keyword 'HARDCODED_API_KEY' found."],
                 'linting_issues': [
-                    {'file': 'src/main.py', 'line': 10, 'column': 1, 'code': 'E302', 'message': 'expected 2 blank lines, found 1'}
+                    {'file': 'src/main.py', 'line': 10, 'column': 1, 'code': 'E302', 'message': 'expected 2 blank lines'}
                 ],
                 'python_test_stubs': [
                     {
@@ -126,14 +135,21 @@ if __name__ == '__main__':
                 ]
             },
             {
-                'file_path': 'com/App.java',
-                'language': 'java',
+                'file_path': 'com/App.java', 'language': 'java',
                 'impacts': ['Java file com/App.java was added.'],
                 'dependencies': [],
                 'tests_suggestions': ['Testing: Ensure JUnit tests cover `App.java`.'],
                 'security_issues': [],
                 'linting_issues': [
                     {'file': 'com/App.java', 'line': 5, 'column': 10, 'code': 'TypeNameCheck', 'message': 'Name TooShort must match pattern.', 'severity': 'error'}
+                ]
+            },
+            {
+                'file_path': 'pom.xml', 'language': 'maven_pom',
+                'impacts': ['Parsed pom.xml, found 15 dependencies.'],
+                'build_dependency_changes': [
+                    "Potentially 1 new <dependency> block(s) added/changed in pom.xml. Review PR diff for specifics.",
+                    "Detected version change for artifact 'org.example:core-lib' from 1.0 to 1.1."
                 ]
             },
             {
@@ -144,7 +160,7 @@ if __name__ == '__main__':
     }
 
     generated_suggestions = generate_suggestions(mock_analysis)
-    print("\nGenerated Suggestions (Multi-Language with Stubs):")
+    print("\nGenerated Suggestions (Multi-Language with Stubs & POM):")
     for sugg in generated_suggestions:
         print(sugg)
 
