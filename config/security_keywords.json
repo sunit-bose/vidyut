@@ -1,0 +1,41 @@
+{
+  "keywords": [
+    "TODO:SECURITY",
+    "FIXME:SECURITY",
+    "HARDCODED_PASSWORD",
+    "hardcoded_password",
+    "Password=",
+    "password =",
+    "secret_key =",
+    "SECRET_KEY =",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AZURE_CLIENT_SECRET",
+    "STRIPE_API_KEY",
+    "PRIVATE_KEY",
+    "private_key",
+    "BEGIN RSA PRIVATE KEY",
+    "BEGIN DSA PRIVATE KEY",
+    "BEGIN EC PRIVATE KEY",
+    "BEGIN OPENSSH PRIVATE KEY",
+    "BEGIN PGP PRIVATE KEY BLOCK",
+    "credentials",
+    "token",
+    "bearer",
+    "jwt"
+  ],
+  "patterns": [
+    {
+      "name": "Generic API Key Pattern",
+      "pattern": "(api_key|apikey|api-key|client_secret|client-secret|access_token|accesstoken|auth_token|authtoken)\\s*[:=]\\s*['\\\"]?[a-zA-Z0-9_\\-.~+/=]{20,}['\\\"]?"
+    },
+    {
+      "name": "URL with Basic Auth Credentials",
+      "pattern": "https?://[a-zA-Z0-9\\-_.~!$&'()*+,;=:%]+:[a-zA-Z0-9\\-_.~!$&'()*+,;=:%]+@[a-zA-Z0-9\\-_.~]+"
+    },
+    {
+      "name": "High Entropy String (Potential Secret)",
+      "pattern": "['\\\"]([a-zA-Z0-9/+]{32,})['\\\"]"
+    }
+  ]
+}

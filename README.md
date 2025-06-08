@@ -1,70 +1,58 @@
 # AI PR Review Agent
 
-**Tagline:** A self-hosted AI agent to help review your GitHub Pull Requests, identify impact areas, and suggest improvements.
+**Tagline:** A self-hosted AI agent to help review your GitHub Pull Requests, identify impact areas, suggest improvements, and enhance your code quality workflow.
 
 ## Overview
 
-This project is an AI-powered agent designed to assist developers and teams by automating parts of the Pull Request (PR) review process. It fetches PR details (including full file content for changed files) from GitHub, performs an initial analysis of these changes (with deeper inspection of Python code structure via AST parsing, and enhanced analysis of Java code structure using `javalang`, including linting), and offers suggestions related to potential impact areas, code reuse, design patterns (SOLID), unit tests, and security considerations. The agent is run via a command-line interface (CLI) and can process multiple PRs concurrently.
+This project is an AI-powered agent designed to assist developers and teams by automating parts of the Pull Request (PR) review process. It fetches PR details (including full file content for changed files) from GitHub, performs various analyses on these changes, and offers suggestions.
 
-The goal is to provide helpful insights to reviewers and authors, streamline the review cycle, and improve code quality over time. While currently in its initial phase with foundational analysis logic, the long-term vision is to build a more sophisticated and configurable review assistant.
+Key analyses include:
+*   **Structural code analysis** for Python (AST) and Java (`javalang`) to identify new/modified functions, classes, and methods.
+*   **Linting** for Python (Flake8) and Java (Checkstyle).
+*   **Security scanning** for known sensitive keywords and risky patterns.
+*   **Dependency analysis** for Maven `pom.xml` files.
+*   **Test stub generation** for new Python and Java code.
 
-## Current Features (Phase 1)
+The agent aims to provide helpful insights to reviewers and authors, streamline the review cycle, and improve code quality. It's run via a command-line interface (CLI) and can process multiple PRs concurrently, offering a summary of findings and detailed suggestions.
+
+## Features
 
 *   Fetches PR details (title, description, author, changed files, diffs) from GitHub.
-*   Fetches the full content of changed files from GitHub, enabling more accurate linting and future analysis.
+*   Fetches the full content of changed files, enabling more accurate analysis.
 *   Accepts multiple PR URLs for concurrent processing.
-*   **Enhanced analysis for Python files:**
-    *   Uses Abstract Syntax Tree (AST) parsing to identify functions, classes, and methods.
-    *   Correlates AST information with PR changes to pinpoint **new or modified definitions**.
-    *   Provides **specific dependency notes** highlighting the signatures and locations of these new/modified Python definitions.
-    *   Generates **targeted unit test suggestions** for these specific new/modified functions, classes, and methods.
-    *   Generates basic `unittest` boilerplate (stubs) for newly defined functions and classes to kickstart testing (experimental, enable with `--analyses all` or by including `python_test_stubs`).
-*   **Enhanced analysis for Java files:**
-    *   Uses `javalang` to parse the structure of Java code (packages, imports, classes, interfaces, enums, methods, fields).
-    *   Correlates structural information with PR changes to pinpoint **new or modified Java definitions** (classes, methods, etc.).
-    *   Provides **specific dependency notes** highlighting the signatures and locations of these new/modified Java definitions.
-    *   Generates **targeted JUnit test suggestions** for new/modified public Java definitions.
-    *   Performs linting using **Checkstyle** with Google's Java Style Guide by default (requires JRE and `checkstyle.jar` setup - see "Tool Setup").
-    *   An example of a Checkstyle linting suggestion you might see:
-      ```
-      --- File: com/example/MyClass.java (java) ---
-        ...
-        Linting Issues (java - Checkstyle):
-          L15:C5 [MethodNameCheck] Name 'MyMethod' must match pattern '^[a-z][a-zA-Z0-9]*$'. (Severity: error)
-          L20 [LineLengthCheck] Line is longer than 100 characters (found 120). (Severity: warning)
-        ...
-      ```
-*   **Basic `pom.xml` Analysis:**
-    *   Identifies and reports potentially new or changed dependency declarations within `pom.xml` files.
-    *   (This analysis type, `maven_pom_analysis`, runs by default).
-*   Rudimentary security keyword scanning in Python and Java code patches (e.g., for 'TODO:SECURITY', 'hardcoded_password').
-*   Generic handling for other file types (e.g., Markdown, text).
-*   Performs foundational analysis for overall PR context:
-    *   Identifying modified files as general impact areas.
-    *   Basic suggestions for code reuse if multiple files are changed (overall summary).
-    *   Reminders for SOLID design principles (overall summary).
-*   Generates a list of suggestions, including general reminders for unit testing and security, plus file-specific points from linters, AST/javalang analysis, and scans.
-*   Command-line interface (CLI) to initiate reviews and display results, with options to select specific analyses to run.
-*   Basic unit test coverage for core modules.
+*   **Configurable Analysis Pipeline:** Choose which analyses to run via CLI.
+*   **Python Analysis:**
+    *   AST parsing for new/modified definitions (functions, classes, methods).
+    *   Specific dependency notes and targeted unit test suggestions.
+    *   Flake8 linting (configurable options via CLI using `--flake8-options`).
+    *   Basic `unittest` stub generation for new definitions (stubs use `NotImplementedError` placeholders).
+*   **Java Analysis:**
+    *   `javalang` parsing for new/modified definitions.
+    *   Specific dependency notes and targeted JUnit test suggestions.
+    *   Checkstyle linting (customizable config file via CLI using `--checkstyle-config`, defaults to Google's Java Style Guide).
+    *   Experimental: Generates basic JUnit 5 boilerplate (stubs) for newly defined public Java classes, interfaces, enums, and their public methods (enable with `--analyses all` or by including `java_test_stubs`). Stubs use `UnsupportedOperationException` as placeholders.
+*   **Maven POM Analysis:** Identifies new/changed dependencies in `pom.xml`.
+*   **Configurable Security Scanning:** Detects keywords and regex patterns defined in `config/security_keywords.json` within changed code lines of Python, Java, and other text files.
+*   **Enhanced Console Reporting:** Provides a structured summary when processing multiple PRs, detailing successes, failures, and analyses with issues.
+*   **Structured Suggestion Data:** Internal representation of suggestions is now structured (list of dictionaries), paving the way for future output formats (e.g., JSON, direct PR comments).
 
 ## Tech Stack
 
-*   Python 3.x
-*   `requests`: For making HTTP requests to the GitHub API.
-*   `pytest`: For unit testing.
-*   `pytest-mock`: For mocking in tests.
-*   `javalang`: For parsing Java code structure.
+*   Python 3.9+
+*   `requests`: For GitHub API interaction.
+*   `javalang`: For Java code parsing.
 *   `flake8`: For Python linting.
-*   Checkstyle: For Java linting (external tool, see Tool Setup).
+*   Checkstyle: For Java linting (external tool).
+*   `pytest` & `pytest-mock`: For development testing.
 
 ## Prerequisites
 
 *   Git
-*   Python 3.7+ (or as per your environment's Python 3 version)
-*   Java Runtime Environment (JRE) for Java linting (see Tool Setup).
+*   Python 3.9 or higher.
+*   Java Runtime Environment (JRE version 8+) for Java linting with Checkstyle.
 
 ## Installation
-# ... (Installation section remains the same) ...
+
 1.  **Clone the repository:**
     ```bash
     git clone <your_repository_url>
@@ -82,112 +70,141 @@ The goal is to provide helpful insights to reviewers and authors, streamline the
     ```bash
     pip install -r requirements.txt
     ```
+    This will install `flake8` and other necessary Python packages.
 
 ## Tool Setup
-# ... (Tool Setup section for Checkstyle remains the same) ...
-### Java Linting Setup (Checkstyle)
 
-To enable Java linting with Checkstyle, you need to have the following set up in your environment:
+### Java Linting (Checkstyle)
 
-1.  **Java Runtime Environment (JRE):** A JRE (version 8 or higher is generally recommended) must be installed and its `java` command must be accessible via the system's PATH.
-2.  **Checkstyle JAR:** Download the Checkstyle JAR file (e.g., `checkstyle-X.Y-all.jar`). You can find the latest releases on the [Checkstyle GitHub releases page](https://github.com/checkstyle/checkstyle/releases).
-    *   The agent attempts to run Checkstyle by invoking `java -jar <checkstyle_jar_command> ...`. The `<checkstyle_jar_command>` is determined as follows:
-        *   If the `CHECKSTYLE_JAR` environment variable is set to the full path of the JAR file (e.g., `export CHECKSTYLE_JAR=/path/to/your/checkstyle-10.3.2-all.jar`), that path will be used.
-        *   Otherwise, the agent will attempt to use the command `checkstyle.jar`, assuming the JAR file has been renamed to `checkstyle.jar` and placed in a directory included in your system's `PATH`.
-3.  **Configuration:** The agent uses a default Checkstyle configuration based on Google's Java Style Guide, located at `config/google_checks.xml`. For custom checks, you would need to modify this file or (in future versions) use a mechanism to specify a custom configuration file path.
+1.  **JRE:** Ensure a JRE (version 8+) is installed and `java` is in your system's PATH.
+2.  **Checkstyle JAR:**
+    *   Download the Checkstyle JAR file (e.g., `checkstyle-X.Y-all.jar`) from the [Checkstyle GitHub releases page](https://github.com/checkstyle/checkstyle/releases).
+    *   **Option 1 (Recommended):** Set the `CHECKSTYLE_JAR` environment variable to the full path of the downloaded JAR file.
+        ```bash
+        export CHECKSTYLE_JAR="/path/to/your/checkstyle-VERSION-all.jar"
+        ```
+    *   **Option 2:** Rename the JAR to `checkstyle.jar` and place it in a directory included in your system's PATH.
+3.  **Configuration:** The agent uses `config/google_checks.xml` by default. You can override this using the `--checkstyle-config` CLI option.
+
+### Python Linting (Flake8)
+
+*   Flake8 is installed as a Python dependency.
+*   It will automatically pick up standard Flake8 configuration files (e.g., `.flake8`, `setup.cfg`, `tox.ini`) if present in your project or user directory.
+*   You can also pass specific Flake8 options via the `--flake8-options` CLI argument.
 
 ## Usage
 
-To run the agent, provide one or more GitHub Pull Request URLs:
+To run the agent, use the `src.main` module and provide one or more GitHub Pull Request URLs:
 
 ```bash
-python -m src.main <pr_url_1> [pr_url_2 ...]
+python -m src.main <pr_url_1> [pr_url_2 ...] [OPTIONS]
 ```
-
-For example:
-```bash
-python -m src.main https://github.com/owner/repo/pull/123 https://github.com/owner/repo/pull/456
-```
-
-Ensure necessary dependencies are installed (as per the Installation section) and tools are set up (see Tool Setup). The agent will process these PRs concurrently (up to a default limit of 4) and display the review suggestions for each.
-
-### Advanced Usage: Selecting Specific Analyses
-
-You can control which analyses the agent runs using the `--analyses` command-line option. Provide a comma-separated list of analysis types. If this option is omitted, a default set of analyses will run.
-
-**Available Analysis Types:**
-*   `python_ast`: In-depth Python code analysis (new/modified definitions, dependency notes, specific test suggestions).
-*   `flake8`: Python linting using Flake8.
-*   `checkstyle`: Java linting using Checkstyle.
-*   `java_parser`: Detailed Java code structure parsing using `javalang` (identifies new/modified definitions, generates specific dependency/test suggestions).
-*   `security_scan`: Rudimentary keyword-based security scan for Python and Java.
-*   `python_test_stubs`: Generates basic unittest boilerplate for new Python functions and classes.
-*   `maven_pom_analysis`: Basic analysis of `pom.xml` files for dependency changes.
-
-**Special Values for `--analyses`:**
-*   `all`: Runs all available analysis types.
-*   `none`: Skips all code analysis (useful for just fetching PR metadata).
-*   `default`: Runs the predefined default set of analyses (currently: `python_ast`, `flake8`, `checkstyle`, `security_scan`, `java_parser`, `maven_pom_analysis`).
 
 **Example:**
 ```bash
-# Run only Python AST analysis and Flake8
-python -m src.main --analyses python_ast,flake8 <pr_url_1>
-
-# Run all analyses, including experimental ones like test stub generation
-python -m src.main --analyses all <pr_url_1>
+python -m src.main https://github.com/owner/repo/pull/123
 ```
 
-### GitHub API Rate Limiting & Private Repositories
-# ... (This section remains the same) ...
-The agent makes calls to the GitHub API. For unauthenticated requests, GitHub imposes rate limits. If you are analyzing many PRs, large PRs with many files, or private repositories, you may encounter these limits or require authentication.
+### Command-Line Options
 
-To use a GitHub Personal Access Token (PAT):
-*   Generate a PAT from your GitHub account with appropriate permissions (e.g., `repo` scope for private repositories).
-*   *(Note: The agent currently does not have a direct command-line option or configuration file setting for tokens. To use a token with the current version, you would need to modify the `api_headers` in `src/code_analyzer.py` (within `_analyze_python_file` and `_analyze_java_file` when `get_file_content_at_ref` is called) to include the `Authorization` header, like `api_headers["Authorization"] = f"token YOUR_PAT_HERE"`. Secure token management via configuration will be improved in future versions.)*
+*   **`pr_urls`** (Positional): One or more GitHub Pull Request URLs to review.
+*   **`--analyses <types>`**: Comma-separated list of analyses to run.
+    *   **Available:** `python_ast`, `flake8`, `checkstyle`, `java_parser`, `security_scan`, `python_test_stubs` (experimental), `java_test_stubs` (experimental), `maven_pom_analysis`.
+    *   **Special values:**
+        *   `all`: Runs all available analyses, including experimental ones.
+        *   `none`: Skips all code analysis steps.
+        *   `default`: Runs `python_ast`, `flake8`, `checkstyle`, `security_scan`, `java_parser`, `maven_pom_analysis`. (This is the behavior if `--analyses` is omitted).
+    *   Example: `--analyses python_ast,flake8,security_scan`
+*   **`--checkstyle-config <PATH>`**: Path to a custom Checkstyle configuration XML file. If not provided, uses the default (`config/google_checks.xml`).
+    *   Example: `--checkstyle-config /path/to/my_checkstyle_rules.xml`
+*   **`--flake8-options "<OPTIONS_STRING>"`**: Custom options string for Flake8, enclosed in quotes (e.g., `"--ignore E501,W503 --max-line-length=88"`). These are passed directly to the `flake8` command.
+    *   Example: `--flake8-options "--ignore E203,W503 --max-doc-length=120"`
+
+**Example with options:**
+```bash
+python -m src.main --analyses all --flake8-options "--max-doc-length=100" https://github.com/owner/repo/pull/123
+```
+
+### Interpreting Output
+
+The agent processes each PR and prints:
+1.  A header with the PR title and link.
+2.  The status of the review for that PR:
+    *   `❌ FAILED`: Critical error prevented processing.
+    *   `⚠️ COMPLETED (with analysis issues)`: Analysis ran but some tools reported errors (e.g., linter misconfiguration, parser errors on malformed code).
+    *   `✅ COMPLETED (No specific actionable suggestions generated)`: Analysis ran cleanly but no specific items were flagged.
+    *   `✅ COMPLETED (Suggestions generated)`: Analysis ran cleanly and suggestions are available.
+3.  A list of suggestions, categorized by type (e.g., linting, security, test stubs).
+    *   `📄 File:` markers indicate which file the following suggestions pertain to.
+    *   Suggestions include line numbers, severity, and messages where applicable.
+    *   Test stubs are provided as code blocks.
+
+After all PRs are processed, an **Overall Processing Summary** is displayed, tallying the outcomes.
+
+### GitHub API Rate Limiting & Private Repositories
+
+The agent makes calls to the GitHub API. For unauthenticated requests, GitHub imposes rate limits. For frequent use or private repositories, a GitHub Personal Access Token (PAT) is recommended.
+
+*(Note: The agent currently does not have a direct command-line option or persistent configuration for tokens. To use a token with the current version, you would need to modify the `api_headers` in `src/pr_parser.py` (within `get_pr_details` and `get_file_content_at_ref`) to include the `Authorization` header, like `api_headers["Authorization"] = f"token YOUR_PAT_HERE"`. This will be improved in future versions.)*
+
+## Customization
+
+### Security Scan Configuration (`config/security_keywords.json`)
+
+The security scan uses a JSON configuration file (`config/security_keywords.json`) to define patterns. You can customize this file:
+
+*   **`keywords`**: A list of case-sensitive strings to find directly in changed lines.
+*   **`patterns`**: A list of dictionaries, each defining a regular expression:
+    *   `"name"`: A descriptive name for the pattern (used in suggestions).
+    *   `"pattern"`: The regex string.
+
+**Example `config/security_keywords.json`:**
+```json
+{
+  "keywords": [
+    "TODO:SECURITY",
+    "FIXME:SECURITY",
+    "HARDCODED_PASSWORD",
+    "private_key"
+  ],
+  "patterns": [
+    {
+      "name": "Generic API Key Pattern",
+      "pattern": "(api_key|apikey|api-key|client_secret|access_token)\\s*[:=]\\s*['\\\"]?[a-zA-Z0-9_\\-.~+/=]{20,}['\\\"]?"
+    },
+    {
+      "name": "URL with Basic Auth Credentials",
+      "pattern": "https?://[a-zA-Z0-9\\-_.~!$&'()*+,;=:%]+:[a-zA-Z0-9\\-_.~!$&'()*+,;=:%]+@[a-zA-Z0-9\\-_.~]+"
+    }
+  ]
+}
+```
+
+### Checkstyle Linter Rules
+The default Checkstyle configuration is `config/google_checks.xml`. You can edit this file directly for project-wide changes or provide a path to your own complete configuration using the `--checkstyle-config` CLI option.
+
+### Flake8 Linter Rules
+Flake8 behavior can be customized using standard Flake8 configuration files (e.g., `.flake8`, `setup.cfg`, `tox.ini`) in your project, or by passing specific options via the `--flake8-options` CLI argument.
+
+## Architecture
+
+An overview of the agent's architecture and design principles can be found in [docs/architecture.md](docs/architecture.md).
 
 ## Contributing
-# ... (Contributing section remains the same) ...
-Contributions are welcome! If you have suggestions for improvements or new features, or if you encounter any bugs, please open an issue on the project's GitHub page to discuss them. Pull requests are also appreciated.
+
+Contributions are welcome! Please open an issue to discuss bugs or feature ideas. Pull requests are also appreciated.
 
 ## License
-# ... (License section remains the same) ...
+
 This project is licensed under the MIT License. (See the `LICENSE` file for details).
 
-## Future Roadmap
+## Future Roadmap (High-Level)
 
-This project aims to evolve into a comprehensive and intelligent PR review assistant. Here are some of  the planned enhancements and architectural considerations for future development:
+*   **Advanced Code Analysis:** Deeper static analysis (SAST, bug patterns), Software Composition Analysis (SCA).
+*   **Sophisticated Suggestion Engine:** More actionable, context-aware, and prioritized suggestions.
+*   **Configuration Management:** Improved handling for API keys, rule settings, etc.
+*   **Platform Support:** Abstract PR parsing for GitLab, Bitbucket.
+*   **Output Formats:** JSON, HTML reports, and potential integrations (e.g., Slack).
+*   **Refined `async` Operations:** For better scalability with many PRs or large files.
 
-### Core Functionality Enhancements
-*   **Advanced Code Analysis:**
-    *   **Deeper Java Static Analysis:** Go beyond `javalang` structure and Checkstyle to include SAST (Static Application Security Testing), advanced bug pattern detection (e.g., with SpotBugs or PMD integration), cross-file dependency tracking, and more precise change impact analysis.
-    *   **Software Composition Analysis (SCA):** Check for vulnerable or outdated third-party libraries (e.g., from `pom.xml`, `requirements.txt`, `package.json`).
-    *   **SOLID Principles:** Implement checks for adherence to SOLID design principles.
-    *   **Security Vulnerabilities:** Integrate more sophisticated security vulnerability detection (e.g., common CWEs, taint analysis concepts).
-    *   **Code Reuse & Duplication:** Introduce robust algorithms for identifying duplicated code and suggesting abstractions.
-    *   **Custom Rules Engine:** Allow users to define custom rules and checks specific to their project or organization.
-*   **Sophisticated Suggestion Engine:**
-    *   Move beyond direct reporting of analysis findings to provide more actionable, context-aware, and prioritized suggestions.
-    *   Potentially incorporate a rules engine or simple ML models for ranking suggestions.
-*   **Advanced Automated Test Generation:** Move beyond basic stubs to generate more complete test cases with inferred logic and mock suggestions (e.g., for Python and Java).
-
-### Architectural & Technical Improvements
-*   **Configuration Management:**
-    *   Implement a system for managing configurations (e.g., API keys for private repos, analysis rule settings, output preferences) via configuration files or environment variables, including for the GitHub token and Checkstyle JAR path.
-    *   User-configurable analysis profiles/presets (e.g., 'fast_lint_only', 'deep_python_analysis', 'full_java_review').
-*   **Scalability & Performance:**
-    *   **Asynchronous Operations:** Transition core I/O-bound operations (like API calls) to use `asyncio` and `aiohttp` for improved performance, especially under higher load.
-    *   **Caching:** Implement caching for API responses and potentially for analysis results of unchanged code sections to reduce redundant processing and API calls.
-    *   **Job Queues:** For scaling beyond a few concurrent PRs, integrate a job queue system (e.g., Celery, RQ) to manage and distribute review tasks.
-*   **Input/Output Abstractions:**
-    *   **Multi-Platform Git Support:** Abstract the PR parsing logic to support other Git hosting platforms (e.g., GitLab, Bitbucket) in addition to GitHub.
-    *   **Flexible Output Formats:** Enable suggestions to be delivered in various formats (e.g., JSON, HTML) and to different destinations.
-    *   **Slack Integration:** Send review summaries and critical suggestions directly to specified Slack channels.
-*   **Structured Logging:** Replace basic `print` statements for internal logging with a robust logging framework (e.g., Python's `logging` module) for better debugging and traceability.
-*   **Enhanced Concurrency:** While initial concurrency for 3-4 PRs will be added, further work will focus on scaling this efficiently.
-
-### Testing & Quality Assurance
-*   **Integration Tests:** Develop integration tests to verify the interactions between different modules.
-*   **End-to-End Tests:** Create end-to-end tests using a dedicated test repository to simulate real-world PR review scenarios.
-
-Contributions and suggestions for this roadmap are welcome!
+(See the end of `README.md` in the source for a more detailed earlier roadmap if interested in prior thoughts).
