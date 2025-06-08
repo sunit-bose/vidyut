@@ -28,24 +28,20 @@ def generate_suggestions(analysis_results):
     # File-specific suggestions
     file_findings = analysis_results.get('file_specific_findings', [])
 
-    # If there are no file_findings AND no overall suggestions have been added yet,
-    # then it's appropriate to return the "No specific suggestions" message.
     if not file_findings and not suggestions:
         return ["No specific suggestions based on the current analysis. General best practices still apply."]
 
-    # has_any_file_specific_actionable_item = False # Can be removed or adapted if needed later
     for finding in file_findings:
         file_path = finding.get('file_path', 'N/A')
         language = finding.get('language', 'unknown')
 
         suggestions.append(f"--- File: {file_path} ({language}) ---")
 
-        # Always show impacts if present
         impacts = finding.get('impacts', [])
         for impact in impacts:
             suggestions.append(f"  Impact: {impact}")
 
-        if language in ['python', 'java']: # Only show these for code files
+        if language in ['python', 'java']:
             dependencies = finding.get('dependencies', [])
             for dep_note in dependencies:
                 suggestions.append(f"  Dependency Note: {dep_note}")
@@ -63,42 +59,46 @@ def generate_suggestions(analysis_results):
                 linter_name = "Flake8" if language == "python" else "Checkstyle" if language == "java" else "Linter"
                 suggestions.append(f"  Linting Issues ({language} - {linter_name}):")
                 for issue in linting_issues:
-                    # For Checkstyle, severity might be available and useful
                     severity_info = f" (Severity: {issue.get('severity', 'info')})" if language == "java" else ""
                     suggestions.append(
                         f"    L{issue['line']}:{issue.get('column',0)} [{issue.get('code','N/A')}] {issue.get('message', 'N/A')}{severity_info}"
                     )
 
-            # If it's a code file but no specific suggestions were generated from the above categories
-            # The 'impacts' are always shown if present (handled above).
-            # This checks if there were no other specific findings for code files.
-            if not any([dependencies, tests_suggestions, security_issues, linting_issues]): # Added linting_issues here
+            if language == 'python':
+                python_test_stubs = finding.get('python_test_stubs', [])
+                if python_test_stubs:
+                    suggestions.append(f"  Generated Python Test Stubs:")
+                    for stub_info in python_test_stubs:
+                        target_name = stub_info.get('target_definition_name', 'N/A')
+                        target_type = stub_info.get('target_definition_type', 'definition')
+                        suggested_file = stub_info.get('suggested_test_filename', 'N/A')
+                        stub_code = stub_info.get('stub_code', '# No stub code generated.')
+
+                        suggestions.append(
+                            f"    - For new {target_type} `{target_name}` (in {file_path}):"
+                        )
+                        suggestions.append(
+                            f"      Suggested Test File: `{suggested_file}`"
+                        )
+                        suggestions.append(
+                            f"      Boilerplate Code:\n```python\n{stub_code}\n```"
+                        )
+                    suggestions.append("    (Note: These are basic stubs. Please review, adjust paths, and implement test logic.)")
+
+            if not any([dependencies, tests_suggestions, security_issues, linting_issues,
+                        (python_test_stubs if language == 'python' else [])]):
                  suggestions.append(f"  No further specific code analysis suggestions for this {language} file in this phase.")
 
         elif language == 'other':
-            # For 'other' files, impacts are usually the only relevant info from current analysis.
-            # If impacts were shown, we might not need to say more.
-            # If there were no impacts (e.g., empty patch or error in analysis for 'other'),
-            # then this note might be useful.
             if not impacts:
                 suggestions.append(f"  No specific findings for this file.")
-            # Optionally, explicitly state that detailed code analysis is not applicable:
-            # else:
-            #    suggestions.append(f"  (File type '{language}' - detailed code analysis not applicable or not yet implemented)")
 
-
-    # If after processing everything, the only suggestions are from overall_summary
-    # and there were no actionable file-specific items (e.g. only "No specific code analysis suggestions..."),
-    # it might still look like "no specific suggestions".
-    # However, the current logic will list file headers even if they have no sub-points.
-    # This is okay for now. The final check is more of a fallback.
     if not suggestions:
         suggestions.append("No actionable suggestions were generated from the analysis. Please review the code manually.")
 
     return suggestions
 
 if __name__ == '__main__':
-    # Example Usage (with mock multi-language analysis data)
     mock_analysis = {
         'overall_summary': {
             'reuse_suggestions': ['Consider shared libraries.'],
@@ -109,56 +109,50 @@ if __name__ == '__main__':
             {
                 'file_path': 'src/main.py',
                 'language': 'python',
-                'impacts': ['Python file src/main.py was modified.'],
-                'tests_suggestions': ['Add tests for new Python functions in src/main.py']
+                'impacts': ['Python file src/main.py was modified significantly.'],
+                'dependencies': ['Dependency: `old_function` might be affected by changes to `new_function`.'],
+                'tests_suggestions': ['Testing: Add unit tests for new Python functions in src/main.py'],
+                'security_issues': ["Potential security keyword 'HARDCODED_API_KEY' found."],
+                'linting_issues': [
+                    {'file': 'src/main.py', 'line': 10, 'column': 1, 'code': 'E302', 'message': 'expected 2 blank lines, found 1'}
+                ],
+                'python_test_stubs': [
+                    {
+                        'target_definition_name': 'my_new_utility_func',
+                        'target_definition_type': 'function',
+                        'suggested_test_filename': 'tests/test_main.py',
+                        'stub_code': 'import unittest\n# TODO: from src.main import my_new_utility_func\n\nclass TestMyNewUtilityFunc(unittest.TestCase):\n    def test_basic(self):\n        # TODO: Implement test\n        self.fail("Test not implemented")\n\nif __name__ == "__main__":\n    unittest.main()'
+                    }
+                ]
             },
             {
                 'file_path': 'com/App.java',
                 'language': 'java',
                 'impacts': ['Java file com/App.java was added.'],
-                'tests_suggestions': ['Add JUnit tests for com/App.java']
+                'dependencies': [],
+                'tests_suggestions': ['Testing: Ensure JUnit tests cover `App.java`.'],
+                'security_issues': [],
+                'linting_issues': [
+                    {'file': 'com/App.java', 'line': 5, 'column': 10, 'code': 'TypeNameCheck', 'message': 'Name TooShort must match pattern.', 'severity': 'error'}
+                ]
             },
             {
-                'file_path': 'README.md',
-                'language': 'other',
-                'impacts': ['Non-code file README.md was modified.']
-                # No other specific suggestions for 'other' type in this mock
+                'file_path': 'README.md', 'language': 'other',
+                'impacts': ['Documentation file README.md was updated.']
             }
         ]
     }
 
     generated_suggestions = generate_suggestions(mock_analysis)
-    print("\nGenerated Suggestions (Multi-Language):")
+    print("\nGenerated Suggestions (Multi-Language with Stubs):")
     for sugg in generated_suggestions:
         print(sugg)
 
     empty_analysis = {
-        'overall_summary': {
-            'reuse_suggestions': [], 'solid_violations': [], 'general_security_reminders': []
-        },
+        'overall_summary': {},
         'file_specific_findings': []
     }
     generated_suggestions_empty = generate_suggestions(empty_analysis)
-    print("\nGenerated Suggestions (Empty Analysis - structure present but no findings):")
+    print("\nGenerated Suggestions (Empty Analysis):")
     for sugg in generated_suggestions_empty:
-        print(sugg)
-
-    none_analysis = None
-    generated_suggestions_none = generate_suggestions(none_analysis)
-    print("\nGenerated Suggestions (None Analysis):")
-    # This will print the error message from within the function and return []
-    # So, the loop won't run.
-    if not generated_suggestions_none:
-        print("(No suggestions returned, error message printed by function)")
-
-    # Example: File listed but no specific sub-findings from analyzer
-    mock_analysis_file_no_sub_findings = {
-        'overall_summary': {},
-        'file_specific_findings': [
-            { 'file_path': 'config.yaml', 'language': 'other', 'impacts': ["Config changed."]}
-        ]
-    }
-    generated_suggestions_no_sub = generate_suggestions(mock_analysis_file_no_sub_findings)
-    print("\nGenerated Suggestions (File with impact but no other specific points):")
-    for sugg in generated_suggestions_no_sub:
         print(sugg)

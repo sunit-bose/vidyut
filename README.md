@@ -18,6 +18,7 @@ The goal is to provide helpful insights to reviewers and authors, streamline the
     *   Correlates AST information with PR changes to pinpoint **new or modified definitions**.
     *   Provides **specific dependency notes** highlighting the signatures and locations of these new/modified Python definitions.
     *   Generates **targeted unit test suggestions** for these specific new/modified functions, classes, and methods.
+    *   Generates basic `unittest` boilerplate (stubs) for newly defined functions and classes to kickstart testing (experimental, enable with `--analyses all` or by including `python_test_stubs`).
 *   **Static analysis and foundational support for Java files:**
     *   Checkstyle integration for linting against Google's Java Style Guide (default configuration at `config/google_checks.xml`), operating on full file content. This helps identify style violations and potential code quality issues.
     *   Basic structure awareness with general suggestions.
@@ -37,7 +38,7 @@ The goal is to provide helpful insights to reviewers and authors, streamline the
     *   Basic suggestions for code reuse if multiple files are changed (overall summary).
     *   Reminders for SOLID design principles (overall summary).
 *   Generates a list of suggestions, including general reminders for unit testing and security, plus file-specific points from linters, AST analysis, and scans.
-*   Command-line interface (CLI) to initiate reviews and display results.
+*   Command-line interface (CLI) to initiate reviews and display results, with options to select specific analyses to run.
 *   Basic unit test coverage for core modules.
 
 ## Tech Stack
@@ -104,6 +105,32 @@ python -m src.main https://github.com/owner/repo/pull/123 https://github.com/own
 
 Ensure necessary dependencies are installed (as per the Installation section) and tools are set up (see Tool Setup). The agent will process these PRs concurrently (up to a default limit of 4) and display the review suggestions for each.
 
+### Advanced Usage: Selecting Specific Analyses
+
+You can control which analyses the agent runs using the `--analyses` command-line option. Provide a comma-separated list of analysis types. If this option is omitted, a default set of analyses will run.
+
+**Available Analysis Types:**
+*   `python_ast`: In-depth Python code analysis (new/modified definitions, dependency notes, specific test suggestions).
+*   `flake8`: Python linting using Flake8.
+*   `checkstyle`: Java linting using Checkstyle.
+*   `java_parser`: Basic Java code structure parsing (currently foundational).
+*   `security_scan`: Rudimentary keyword-based security scan for Python and Java.
+*   `python_test_stubs`: Generates basic unittest boilerplate for new Python functions and classes.
+
+**Special Values for `--analyses`:**
+*   `all`: Runs all available analysis types.
+*   `none`: Skips all code analysis (useful for just fetching PR metadata).
+*   `default`: Runs the predefined default set of analyses (currently: `python_ast`, `flake8`, `checkstyle`, `security_scan`).
+
+**Example:**
+```bash
+# Run only Python AST analysis and Flake8
+python -m src.main --analyses python_ast,flake8 <pr_url_1>
+
+# Run all analyses, including experimental ones like test stub generation
+python -m src.main --analyses all <pr_url_1>
+```
+
 ### GitHub API Rate Limiting & Private Repositories
 
 The agent makes calls to the GitHub API. For unauthenticated requests, GitHub imposes rate limits. If you are analyzing many PRs, large PRs with many files, or private repositories, you may encounter these limits or require authentication.
@@ -133,9 +160,12 @@ This project aims to evolve into a comprehensive and intelligent PR review assis
 *   **Sophisticated Suggestion Engine:**
     *   Move beyond direct reporting of analysis findings to provide more actionable, context-aware, and prioritized suggestions.
     *   Potentially incorporate a rules engine or simple ML models for ranking suggestions.
+*   **Advanced Automated Test Generation:** Move beyond basic stubs to generate more complete test cases with inferred logic and mock suggestions (e.g., for Python).
 
 ### Architectural & Technical Improvements
-*   **Configuration Management:** Implement a system for managing configurations (e.g., API keys for private repos, analysis rule settings, output preferences) via configuration files or environment variables, including for the GitHub token and Checkstyle JAR path.
+*   **Configuration Management:**
+    *   Implement a system for managing configurations (e.g., API keys for private repos, analysis rule settings, output preferences) via configuration files or environment variables, including for the GitHub token and Checkstyle JAR path.
+    *   User-configurable analysis profiles/presets (e.g., 'fast_lint_only', 'deep_python_analysis').
 *   **Scalability & Performance:**
     *   **Asynchronous Operations:** Transition core I/O-bound operations (like API calls) to use `asyncio` and `aiohttp` for improved performance, especially under higher load.
     *   **Caching:** Implement caching for API responses and potentially for analysis results of unchanged code sections to reduce redundant processing and API calls.
