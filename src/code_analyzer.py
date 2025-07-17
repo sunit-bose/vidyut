@@ -107,21 +107,13 @@ def _format_javalang_type_node(type_node) -> str:
     if isinstance(type_node, javalang.tree.BasicType):
         name_str = type_node.name
     elif isinstance(type_node, javalang.tree.ReferenceType):
-        parts = []
+        # Corrected logic for ReferenceType name construction
+        name_parts = []
         current = type_node
         while current:
-            parts.append(current.name)
-            current = current.sub_type # This was the error, should be getattr(current, 'sub_type', None)
-        name_str = ".".join(reversed(parts)) # Corrected: parts are already in order from javalang parsing of ReferenceType
-
-        # Corrected logic for ReferenceType name construction
-        if type_node.name:
-            name_parts = [type_node.name]
-            current_sub = type_node.sub_type
-            while current_sub:
-                name_parts.append(current_sub.name) # This builds it like [BaseClass, base, example, com]
-                current_sub = current_sub.sub_type
-            name_str = ".".join(reversed(name_parts)) # So this becomes com.example.base.BaseClass
+            name_parts.append(current.name)
+            current = getattr(current, 'sub_type', None)
+        name_str = ".".join(name_parts)
 
         if type_node.arguments:
             args = [_format_javalang_type_node(arg.type) for arg in type_node.arguments if hasattr(arg, 'type') and arg.type]
@@ -337,6 +329,15 @@ def _analyze_java_file(file_info: Dict[str, Any], pr_data: Dict[str, Any], analy
                         else: class_info['extends'] = _format_javalang_type_node(type_decl.extends)
 
                     if hasattr(type_decl, 'body') and type_decl.body:
+                        # Estimate end_line by finding the maximum line number in the body
+                        all_lines = [type_decl.position.line] if hasattr(type_decl, 'position') and type_decl.position else []
+                        if hasattr(type_decl, 'body') and type_decl.body:
+                            for member in type_decl.body:
+                                if hasattr(member, 'position') and member.position:
+                                    all_lines.append(member.position.line)
+                        if all_lines:
+                            class_info['end_line'] = max(all_lines)
+
                         for member in type_decl.body:
                             member_start_line = member.position.line if hasattr(member, 'position') and member.position else class_info['start_line']
                             if isinstance(member, (MethodDeclaration, ConstructorDeclaration)):
@@ -362,7 +363,6 @@ def _analyze_java_file(file_info: Dict[str, Any], pr_data: Dict[str, Any], analy
 
     if ANALYSIS_JAVA_PARSER in analyses_to_run and all_definitions_from_javalang:
         identified_changed_definitions = []
-        num_total_parsed = len(all_definitions_from_javalang)
         # Preserve existing impacts not related to javalang parsing success/failure messages
         current_impacts = [imp for imp in findings['impacts']
                            if not imp.startswith("Successfully parsed Java file") and \
@@ -371,28 +371,34 @@ def _analyze_java_file(file_info: Dict[str, Any], pr_data: Dict[str, Any], analy
                               not imp.startswith("Unexpected error during javalang parsing")]
 
         for definition in all_definitions_from_javalang:
-            change_type = None; is_code_entity = definition['type'] not in ['package', 'import']
-            def_start = definition.get('start_line', 0) # Ensure def_start has a value
+            change_type = None
+            is_code_entity = definition['type'] not in ['package', 'import']
+            def_start = definition.get('start_line', 0)
 
             if is_code_entity and def_start > 0 and ('name' in definition or definition.get('type') == 'ConstructorDeclaration'):
                 def_end = definition.get('end_line', def_start)
-                if file_status == 'added': change_type = 'new'
+                if file_status == 'added':
+                    change_type = 'new'
                 elif changed_line_info:
                     for hunk_start, hunk_length in changed_line_info:
-                        hunk_end = hunk_start + hunk_length -1;
-                        if max(def_start, hunk_start) <= min(def_end, hunk_end): change_type = 'modified'; break
-
+                        hunk_end = hunk_start + hunk_length - 1
+                        if max(def_start, hunk_start) <= min(def_end, hunk_end):
+                            change_type = 'modified'
+                            break
             if change_type:
                 definition['change_type'] = change_type
                 if definition['type'] in ['ClassDeclaration', 'InterfaceDeclaration', 'EnumDeclaration']:
                     for member_list_key in ['methods', 'fields']:
-                        for member in definition.get(member_list_key, []): member['change_type'] = change_type
+                        for member in definition.get(member_list_key, []):
+                            member['change_type'] = change_type
                 identified_changed_definitions.append(definition)
-            elif not is_code_entity: identified_changed_definitions.append(definition)
+            elif not is_code_entity:
+                identified_changed_definitions.append(definition)
 
         findings['java_definitions'] = identified_changed_definitions
         findings['impacts'] = current_impacts
         num_changed_identified = len([d for d in identified_changed_definitions if 'change_type' in d and d['type'] not in ['package', 'import']])
+        num_total_parsed = len(all_definitions_from_javalang)
         if num_changed_identified > 0: findings['impacts'].append(f"Identified {num_changed_identified} new/modified Java code definitions in {filename} (out of {num_total_parsed} total structural elements parsed).")
         elif num_total_parsed > 0 and any(d['type'] not in ['package', 'import'] for d in all_definitions_from_javalang) : findings['impacts'].append(f"Parsed {num_total_parsed} Java structural elements in {filename}, but no code definitions appear directly in changed lines.")
         elif num_total_parsed > 0: findings['impacts'].append(f"Parsed {num_total_parsed} Java package/import statements from {filename}.")
@@ -629,21 +635,12 @@ def _analyze_maven_pom(file_info: Dict[str, Any], pr_data: Dict[str, Any], analy
     except Exception as e: findings['impacts'].append(f"Unexpected error during {filename} analysis: {str(e)}")
     return findings
 
-def _analyze_other_file(file_info: Dict[str, Any], pr_data: Dict[str, Any]) -> Dict[str, Any]:
-    # For 'other' files, also run security scan on patch if available and configured
+def _analyze_other_file(file_info: Dict[str, Any], pr_data: Dict[str, Any], analyses_to_run: List[str]) -> Dict[str, Any]:
     patch_text = file_info.get('patch')
     security_issues_other = []
     if patch_text and ANALYSIS_SECURITY_KEYWORD_SCAN in analyses_to_run:
         security_issues_other = _perform_security_scan(patch_text)
-
-    return {'file_path': file_info.get('filename'),
-            'language': 'other',
-            'impacts': [f"Non-code file changed: {file_info.get('filename')} (Status: {file_info.get('status', 'N/A')})"],
-            'dependencies': [],
-            'tests_suggestions': [],
-            'security_issues': security_issues_other,
-            'linting_issues': [],
-            'raw_analysis_data': {}}
+    return {'file_path': file_info.get('filename'), 'language': 'other', 'impacts': [f"Non-code file changed: {file_info.get('filename')} (Status: {file_info.get('status', 'N/A')})"], 'dependencies': [], 'tests_suggestions': [], 'security_issues': security_issues_other, 'linting_issues': [], 'raw_analysis_data': {}}
 
 def _perform_security_scan(patch_text: str) -> List[str]:
     """
@@ -691,10 +688,10 @@ def analyze_code_changes(
             findings = _analyze_python_file(file_info, pr_data, analyses_to_run, flake8_options_str=flake8_options_str)
         elif filename.endswith('.java'):
             findings = _analyze_java_file(file_info, pr_data, analyses_to_run, checkstyle_config_path=checkstyle_config_path)
-        elif filename == 'pom.xml':
+        elif os.path.basename(filename) == 'pom.xml':
             findings = _analyze_maven_pom(file_info, pr_data, analyses_to_run)
         else:
-            findings = _analyze_other_file(file_info, pr_data)
+            findings = _analyze_other_file(file_info, pr_data, analyses_to_run)
         file_specific_findings_list.append(findings)
     overall_reuse_suggestions = []; overall_solid_violations = []; general_security_reminders = []
     if len(pr_data.get('files_changed', [])) > 1: overall_reuse_suggestions.append("Consider if there are common patterns across the changed files that could be abstracted globally.")
@@ -706,11 +703,3 @@ def analyze_code_changes(
          general_security_reminders.append("Overall Security Reminder: Security scan was active. Ensure manual review for any subtle security implications not caught by automated checks.")
 
     return {'overall_summary': {'reuse_suggestions': overall_reuse_suggestions, 'solid_violations': overall_solid_violations, 'general_security_reminders': general_security_reminders}, 'file_specific_findings': file_specific_findings_list}
-
-if __name__ == '__main__':
-    mock_pr_data_py = {'title': 'Test PR - Python Changes', 'owner': 'testowner', 'repo': 'testrepo', 'head_sha': 'testsha', 'files_changed': [ {'filename': 'src/module_a/file1.py', 'status': 'added', 'patch': "def new_func():\n  pass\n\nclass NewClass:\n  pass"},]}
-    test_analyses = ALL_ANALYSES
-    analysis_results_py = analyze_code_changes(mock_pr_data_py, test_analyses)
-    mock_pr_data_java = {'title': 'Test PR - Java Changes', 'owner': 'testowner', 'repo': 'testrepo', 'head_sha': 'testsha', 'files_changed': [ {'filename': 'com/example/Main.java', 'status': 'added', 'patch': 'public class Main { public void newMethod() {} }'},]}
-    analysis_results_java = analyze_code_changes(mock_pr_data_java, test_analyses)
-    # ... (print loops as before, simplified for brevity) ...
