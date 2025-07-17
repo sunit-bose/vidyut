@@ -195,7 +195,7 @@ def main():
                 print("   Suggestions:")
                 for sugg in res_suggestions:
                     sugg_type = sugg.get("type")
-                    file_path = sugg.get("file_path", "") # Provide default for file_path
+                    file_path = sugg.get("file_path", "")
 
                     if sugg_type == "file_marker":
                         print(f"\n  📄 File: {sugg.get('file_path')} ({sugg.get('language')})")
@@ -210,10 +210,8 @@ def main():
                     elif sugg_type in ["python_test_stub", "java_test_stub"]:
                         lang_display = "Python" if sugg_type == "python_test_stub" else "Java"
                         print(f"    🤖 Generated {lang_display} Test Stub:")
-                        # file_path here is the source file for which stub is generated
                         print(f"       Target: {sugg.get('target_definition_type')} '{sugg.get('target_definition_name')}' in {file_path}")
                         print(f"       Suggested Test File: {sugg.get('suggested_test_filename')}")
-                        # Ensure details (stub_code) is not None before printing
                         stub_code = sugg.get('details', '# No code provided')
                         print(f"       Code:\n```\n{stub_code}\n```")
                     elif sugg_type == "pom_dependency_change":
@@ -223,17 +221,15 @@ def main():
                     elif sugg_type == "file_impact":
                         print(f"    ⚡ Impact: {sugg.get('message')} (File: {file_path})")
                     elif sugg_type == "info":
-                        # Avoid repeating file_path if it's part of the message already for some info types
                         if file_path and file_path not in sugg.get('message', ''):
-                             print(f"    ℹ️ Info: {sugg.get('message')} (File: {file_path})")
+                            print(f"    ℹ️ Info: {sugg.get('message')} (File: {file_path})")
                         else:
-                             print(f"    ℹ️ Info: {sugg.get('message')}")
+                            print(f"    ℹ️ Info: {sugg.get('message')}")
                     elif sugg_type == "error":
                         print(f"    ❌ ERROR (Suggestion Gen): {sugg.get('message')}")
                     else:
-                        # Fallback for unknown suggestion types
                         print(f"    ❓ Unknown Suggestion: {sugg}")
-            elif not res_suggestions and not has_analysis_issues and not res_error_message : # Should be caught by no_suggestions_generated_count but as a fallback
+            elif not res_suggestions and not has_analysis_issues and not res_error_message :
                  print(f"     ℹ️ Info: No suggestions or errors reported for this PR.")
 
 
