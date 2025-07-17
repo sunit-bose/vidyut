@@ -1,7 +1,6 @@
 import pytest
 from src.code_analyzer import (
     analyze_code_changes, _analyze_python_file, _analyze_java_file, _analyze_other_file, _analyze_maven_pom,
-    RUDIMENTARY_SECURITY_KEYWORDS,
     ANALYSIS_PYTHON_AST, ANALYSIS_FLAKE8, ANALYSIS_JAVA_CHECKSTYLE,
     ANALYSIS_JAVA_PARSER, ANALYSIS_SECURITY_KEYWORD_SCAN, ANALYSIS_PYTHON_TEST_STUB_GEN,
     ANALYSIS_MAVEN_POM, ANALYSIS_JAVA_TEST_STUB_GEN, ALL_ANALYSES
