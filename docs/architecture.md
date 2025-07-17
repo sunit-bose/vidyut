@@ -1,6 +1,6 @@
 # Agent Architecture
 
-This document provides a high-level overview of the AI PR Review Agent's architecture, outlining its main components and the flow of data.
+This document provides a high-level overview of the PR Review Agent's architecture, outlining its main components and the flow of data.
 
 ## Core Components
 

@@ -1,10 +1,10 @@
-# AI PR Review Agent
+# PR Review Agent
 
-**Tagline:** A self-hosted AI agent to help review your GitHub Pull Requests, identify impact areas, suggest improvements, and enhance your code quality workflow.
+**Tagline:** A self-hosted agent to help review your GitHub Pull Requests, identify impact areas, suggest improvements, and enhance your code quality workflow.
 
 ## Overview
 
-This project is an AI-powered agent designed to assist developers and teams by automating parts of the Pull Request (PR) review process. It fetches PR details (including full file content for changed files) from GitHub, performs various analyses on these changes, and offers suggestions.
+This project is an agent designed to assist developers and teams by automating parts of the Pull Request (PR) review process. It fetches PR details (including full file content for changed files) from GitHub, performs various analyses on these changes, and offers suggestions.
 
 Key analyses include:
 *   **Structural code analysis** for Python (AST) and Java (`javalang`) to identify new/modified functions, classes, and methods.
@@ -208,3 +208,81 @@ This project is licensed under the MIT License. (See the `LICENSE` file for deta
 *   **Refined `async` Operations:** For better scalability with many PRs or large files.
 
 (See the end of `README.md` in the source for a more detailed earlier roadmap if interested in prior thoughts).
+
+## CI/CD Integration
+
+This utility can be integrated into your CI/CD pipeline to automatically review pull requests. Here are some examples for popular CI/CD platforms:
+
+### Jenkins
+
+```groovy
+pipeline {
+    agent any
+    stages {
+        stage('PR Review') {
+            steps {
+                script {
+                    // Ensure the repository is checked out
+                    checkout scm
+                    // Run the PR review agent
+                    sh 'python -m src.main ${env.CHANGE_URL}'
+                }
+            }
+        }
+    }
+}
+```
+
+### GitHub Actions
+
+```yaml
+name: PR Review
+
+on:
+  pull_request:
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run PR Review
+        run: python -m src.main ${{ github.event.pull_request.html_url }}
+```
+
+### GitLab CI/CD
+
+```yaml
+stages:
+  - review
+
+pr_review:
+  stage: review
+  image: python:3.9
+  script:
+    - pip install -r requirements.txt
+    - python -m src.main $CI_MERGE_REQUEST_PROJECT_URL/merge_requests/$CI_MERGE_REQUEST_IID
+```
+
+### Bitbucket Pipelines
+
+```yaml
+image: python:3.9
+
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: PR Review
+          script:
+            - pip install -r requirements.txt
+            - python -m src.main $BITBUCKET_PR_ID
+```
