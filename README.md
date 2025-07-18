@@ -1,8 +1,17 @@
 # PR Review Agent
 
+
+
 **Tagline:** A self-hosted agent to help review your GitHub Pull Requests, identify impact areas, suggest improvements, and enhance your code quality workflow.
 
 ## Overview
+
+<img width="499" height="491" alt="Screenshot 2025-07-18 at 11 09 24 AM" src="https://github.com/user-attachments/assets/9161d2ae-ccfa-4a01-b3ce-856ce9b90451" />
+
+<img width="481" height="385" alt="Screenshot 2025-07-18 at 11 09 05 AM" src="https://github.com/user-attachments/assets/d49434a6-29db-4c53-ab00-f56267664cd1" />
+
+<img width="354" height="177" alt="Screenshot 2025-07-18 at 11 08 17 AM" src="https://github.com/user-attachments/assets/a36ca084-1fc1-491f-b0ef-a62588883248" />
+
 
 This project is an agent designed to assist developers and teams by automating parts of the Pull Request (PR) review process. It fetches PR details (including full file content for changed files) from GitHub, performs various analyses on these changes, and offers suggestions.
 
