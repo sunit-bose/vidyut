@@ -189,6 +189,15 @@ def generate_suggestions(analysis_results: dict) -> list[dict]:
                      "message": f"No specific code analysis suggestions for this Java file in this phase."
                  })
 
+        ai_generated_code = finding.get('ai_generated_code')
+        if ai_generated_code:
+            structured_suggestions.append({
+                "type": "ai_generated_code",
+                "file_path": file_path,
+                "confidence": ai_generated_code.get('confidence'),
+                "message": ai_generated_code.get('message')
+            })
+
         elif language == 'maven_pom':
             build_dep_changes = finding.get('build_dependency_changes', [])
             if build_dep_changes:

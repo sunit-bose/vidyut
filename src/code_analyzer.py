@@ -14,8 +14,8 @@ import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Tuple, Optional # Added Optional
 import json # Added for loading security keywords
 
-ANALYSIS_PYTHON_AST = "python_ast"; ANALYSIS_FLAKE8 = "flake8"; ANALYSIS_JAVA_CHECKSTYLE = "checkstyle"; ANALYSIS_JAVA_PARSER = "java_parser"; ANALYSIS_SECURITY_KEYWORD_SCAN = "security_scan"; ANALYSIS_PYTHON_TEST_STUB_GEN = "python_test_stubs"; ANALYSIS_MAVEN_POM = "maven_pom_analysis"; ANALYSIS_JAVA_TEST_STUB_GEN = "java_test_stubs"
-ALL_ANALYSES = [ANALYSIS_PYTHON_AST, ANALYSIS_FLAKE8, ANALYSIS_JAVA_CHECKSTYLE, ANALYSIS_JAVA_PARSER, ANALYSIS_SECURITY_KEYWORD_SCAN, ANALYSIS_PYTHON_TEST_STUB_GEN, ANALYSIS_MAVEN_POM, ANALYSIS_JAVA_TEST_STUB_GEN]
+ANALYSIS_PYTHON_AST = "python_ast"; ANALYSIS_FLAKE8 = "flake8"; ANALYSIS_JAVA_CHECKSTYLE = "checkstyle"; ANALYSIS_JAVA_PARSER = "java_parser"; ANALYSIS_SECURITY_KEYWORD_SCAN = "security_scan"; ANALYSIS_PYTHON_TEST_STUB_GEN = "python_test_stubs"; ANALYSIS_MAVEN_POM = "maven_pom_analysis"; ANALYSIS_JAVA_TEST_STUB_GEN = "java_test_stubs"; ANALYSIS_AI_GENERATED_CODE = "ai_generated_code_detection"
+ALL_ANALYSES = [ANALYSIS_PYTHON_AST, ANALYSIS_FLAKE8, ANALYSIS_JAVA_CHECKSTYLE, ANALYSIS_JAVA_PARSER, ANALYSIS_SECURITY_KEYWORD_SCAN, ANALYSIS_PYTHON_TEST_STUB_GEN, ANALYSIS_MAVEN_POM, ANALYSIS_JAVA_TEST_STUB_GEN, ANALYSIS_AI_GENERATED_CODE]
 DEFAULT_ANALYSES_TO_RUN = [ANALYSIS_PYTHON_AST, ANALYSIS_FLAKE8, ANALYSIS_JAVA_CHECKSTYLE, ANALYSIS_SECURITY_KEYWORD_SCAN, ANALYSIS_JAVA_PARSER, ANALYSIS_MAVEN_POM]
 # RUDIMENTARY_SECURITY_KEYWORDS will be replaced by loaded config
 
@@ -78,7 +78,7 @@ def _get_changed_line_ranges_from_patch(patch_text_local: str) -> List[Tuple[int
                 match_local = re.search(r"\+([0-9]+)(?:,([0-9]+))?", line_local)
                 if match_local:
                     start_line = int(match_local.group(1)); length = int(match_local.group(2) or 1)
-                    if length > 0: ranges_local.append((start_line, length))
+                    if length > 0: ranges_local.append((start_line, start_line + length - 1))
     return ranges_local
 
 def _parse_flake8_output(output_str: str, original_filename: str) -> List[Dict[str, Any]]:
@@ -385,15 +385,29 @@ def _analyze_java_file(file_info: Dict[str, Any], pr_data: Dict[str, Any], analy
                         if max(def_start, hunk_start) <= min(def_end, hunk_end):
                             change_type = 'modified'
                             break
+        for definition in all_definitions_from_javalang:
+            change_type = None
+            is_code_entity = definition['type'] not in ['package', 'import']
+            def_start = definition.get('start_line', 0)
+
+            if is_code_entity and def_start > 0 and ('name' in definition or definition.get('type') == 'ConstructorDeclaration'):
+                def_end = definition.get('end_line', def_start)
+                if file_status == 'added':
+                    change_type = 'new'
+                elif changed_line_info:
+                    for hunk_start, hunk_length in changed_line_info:
+                        hunk_end = hunk_start + hunk_length - 1
+                        if max(def_start, hunk_start) <= min(def_end, hunk_end):
+                            change_type = 'modified'
+                            break
             if change_type:
                 definition['change_type'] = change_type
                 if definition['type'] in ['ClassDeclaration', 'InterfaceDeclaration', 'EnumDeclaration']:
                     for member_list_key in ['methods', 'fields']:
                         for member in definition.get(member_list_key, []):
                             member['change_type'] = change_type
-                identified_changed_definitions.append(definition)
-            elif not is_code_entity:
-                identified_changed_definitions.append(definition)
+            print(definition, change_type)
+            identified_changed_definitions.append(definition)
 
         findings['java_definitions'] = identified_changed_definitions
         findings['impacts'] = current_impacts
@@ -692,6 +706,11 @@ def analyze_code_changes(
             findings = _analyze_maven_pom(file_info, pr_data, analyses_to_run)
         else:
             findings = _analyze_other_file(file_info, pr_data, analyses_to_run)
+        if ANALYSIS_AI_GENERATED_CODE in analyses_to_run:
+            patch_text = file_info.get('patch')
+            ai_detection_result = _detect_ai_generated_code(patch_text)
+            if ai_detection_result:
+                findings['ai_generated_code'] = ai_detection_result
         file_specific_findings_list.append(findings)
     overall_reuse_suggestions = []; overall_solid_violations = []; general_security_reminders = []
     if len(pr_data.get('files_changed', [])) > 1: overall_reuse_suggestions.append("Consider if there are common patterns across the changed files that could be abstracted globally.")
@@ -703,3 +722,34 @@ def analyze_code_changes(
          general_security_reminders.append("Overall Security Reminder: Security scan was active. Ensure manual review for any subtle security implications not caught by automated checks.")
 
     return {'overall_summary': {'reuse_suggestions': overall_reuse_suggestions, 'solid_violations': overall_solid_violations, 'general_security_reminders': general_security_reminders}, 'file_specific_findings': file_specific_findings_list}
+
+def _detect_ai_generated_code(patch_text: str) -> Optional[Dict[str, Any]]:
+    """
+    A heuristic-based approach to detect potential AI-generated code.
+    This is not a definitive solution and should be used with caution.
+    """
+    if not patch_text:
+        return None
+
+    # Heuristics to detect AI-generated code
+    # 1. Look for common AI-related keywords in comments
+    ai_keywords = ["Copilot", "Tabnine", "AI-generated", "AI-assisted", "generated by", "Jules"]
+    for keyword in ai_keywords:
+        if keyword.lower() in patch_text.lower():
+            return {
+                "confidence": 0.9,
+                "message": f"Potential AI-generated code detected. Found keyword: '{keyword}'"
+            }
+
+    # 2. Look for long, complex, and well-formatted comments that are not typical of human developers
+    # This is a very basic heuristic and may not be accurate
+    # A more advanced approach would involve analyzing the code structure and style
+    # For now, we will just check for the length of the comments
+    comment_lines = [line for line in patch_text.splitlines() if line.strip().startswith("#")]
+    if len(comment_lines) > 10:
+        return {
+            "confidence": 0.6,
+            "message": "Potential AI-generated code detected. Found a large number of comments."
+        }
+
+    return None

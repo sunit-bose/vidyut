@@ -227,6 +227,8 @@ def main():
                             print(f"    ℹ️ Info: {sugg.get('message')}")
                     elif sugg_type == "error":
                         print(f"    ❌ ERROR (Suggestion Gen): {sugg.get('message')}")
+                    elif sugg_type == "ai_generated_code":
+                        print(f"    🤖 AI Generated Code Detection: {sugg.get('message')} (Confidence: {sugg.get('confidence')})")
                     else:
                         print(f"    ❓ Unknown Suggestion: {sugg}")
             elif not res_suggestions and not has_analysis_issues and not res_error_message :
