@@ -28,6 +28,7 @@ The agent is primarily composed of the following Python modules located in the `
         *   **Java:** Uses `javalang` for parsing, Checkstyle for linting. Identifies new/modified definitions, generates dependency notes, test suggestions, and test stubs.
         *   **Maven `pom.xml`:** Uses `xml.etree.ElementTree` to parse and identify dependency changes.
     *   **Security Scanning:** Implements a configurable keyword and regex-pattern based security scan on patch text for all relevant file types. The configuration is loaded from `config/security_keywords.json`.
+    *   **AI-Generated Code Detection:** Implements an improved heuristic-based approach to detect potential AI-generated code.
     *   **Configuration Handling:** Accepts and uses configuration for linters (Checkstyle config path, Flake8 options string).
     *   **Results Aggregation:** Collects findings from all enabled analyses for each file into a structured dictionary. These findings include impacts, linting issues, security concerns, identified code definitions, dependency notes, and test suggestions/stubs.
 
