@@ -210,6 +210,15 @@ This project is licensed under the MIT License. (See the `LICENSE` file for deta
 
 (See the end of `README.md` in the source for a more detailed earlier roadmap if interested in prior thoughts).
 
+### Interpreting the Output
+
+The overall processing summary provides the following information:
+
+*   **critically failed:** The number of pull requests that could not be processed due to a critical error.
+*   **completed with analysis issues:** The number of pull requests that were processed, but with one or more analysis tools reporting an error.
+*   **completed with no specific suggestions:** The number of pull requests that were processed successfully, but with no specific suggestions generated.
+*   **completed cleanly with suggestions:** The number of pull requests that were processed successfully and have suggestions.
+
 ## CI/CD Integration
 
 This utility can be integrated into your CI/CD pipeline to automatically review pull requests. Here are some examples for popular CI/CD platforms:
