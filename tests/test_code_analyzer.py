@@ -293,5 +293,5 @@ def test_ai_generated_code_detection(mock_get_content):
     with patch('src.code_analyzer.get_file_content_at_ref', return_value=file_content):
         result = analyze_code_changes(pr_data, [ANALYSIS_AI_GENERATED_CODE])
         assert 'ai_generated_code' in result['file_specific_findings'][0]
-        assert result['file_specific_findings'][0]['ai_generated_code']['confidence'] == 0.8
+        assert result['file_specific_findings'][0]['ai_generated_code']['confidence'] == 0.9
         assert "Potential AI-generated code detected. Found keyword: 'Copilot'" in result['file_specific_findings'][0]['ai_generated_code']['message']

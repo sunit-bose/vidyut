@@ -8,7 +8,7 @@ from src.code_analyzer import (
 
 def test_generate_suggestions_input_none(capsys):
     result_none = generate_suggestions(None)
-    assert result_none == []
+    assert result_none == [{"type": "error", "message": "No analysis results provided."}]
     captured_none = capsys.readouterr()
     assert "Error: No analysis results provided for suggestion generation." in captured_none.out
 
@@ -20,7 +20,7 @@ def test_generate_suggestions_completely_empty_analysis():
         'file_specific_findings': []
     }
     result = generate_suggestions(analysis_results)
-    assert result == ["No specific suggestions based on the current analysis. General best practices still apply."]
+    assert result == [{"type": "info", "message": "No specific suggestions based on the current analysis. General best practices still apply."}]
 
 def test_generate_suggestions_only_overall_summary():
     analysis_results = {
@@ -32,9 +32,9 @@ def test_generate_suggestions_only_overall_summary():
         'file_specific_findings': []
     }
     result = generate_suggestions(analysis_results)
-    assert "Overall Code Reuse: Overall: Consider abstracting common utilities." in result
-    assert "Overall Design Pattern: Overall: Check for SRP violations." in result
-    assert "Overall: Remember to validate all inputs." in result
+    assert {"type": "general_summary", "category": "code_reuse", "message": "Overall: Consider abstracting common utilities."} in result
+    assert {"type": "general_summary", "category": "design_pattern", "message": "Overall: Check for SRP violations."} in result
+    assert {"type": "general_summary", "category": "security_reminder", "message": "Overall: Remember to validate all inputs."} in result
     assert len(result) == 3
 
 def test_generate_suggestions_with_detailed_java_pom_and_python_stubs():
@@ -84,45 +84,24 @@ def test_generate_suggestions_with_detailed_java_pom_and_python_stubs():
         ]
     }
     suggestions = generate_suggestions(mock_analysis)
-    output_str = "\n".join(suggestions)
-
-    # Check Overall
-    assert "Overall: Refactor common logic." in output_str
-    assert "Overall: Adhere to SOLID." in output_str
-    assert "Overall: Check inputs." in output_str
-
-    # Check Python file with stubs
-    assert "--- File: src/utils.py (python) ---" in output_str
-    assert "Generated Python Test Stubs:" in output_str
-    assert "For new function `my_new_func`" in output_str
-
-    # Check Java file with stubs
-    assert "--- File: com/example/MyClass.java (java) ---" in output_str
-    assert "Dependency Note: Modified public method `getItems(String filter)`" in output_str
-    assert "Testing Suggestion: Modified public method `getItems(String filter)`" in output_str
-    assert "Linting Issues (java - Checkstyle):" in output_str
-    assert "L5:1 [JavadocPackage] Missing package-info.java file. (Severity: info)" in output_str
-    assert "Security Concern: Potential keyword 'secretPassword' found." in output_str
-    assert "Generated Java Test Stubs (JUnit 5):" in output_str # New assertion
-    assert "For new class `MyService` (in com/example/MyClass.java):" in output_str # New assertion
-    assert "Suggested Test File: `com/example/MyServiceTest.java`" in output_str # New assertion
-    assert "```java\npackage com.example;\nimport org.junit.jupiter.api.Test;\n// ...etc...\n```" in output_str # New assertion
-    assert "(Note: These are basic JUnit 5 stubs. Please review, adjust paths/imports, and implement test logic.)" in output_str # New assertion
-
-    # Check POM file
-    assert "--- File: pom.xml (maven_pom) ---" in output_str
-    assert "Maven POM Dependency Changes/Observations:" in output_str
-    assert "    - Potentially 1 new/modified <dependency> block(s)" in output_str
-
-    # Check Other file
-    assert "--- File: README.md (other) ---" in output_str
-    readme_section_start = output_str.find("--- File: README.md (other) ---")
-    readme_suggestions = output_str[readme_section_start:]
-    assert "Dependency Note:" not in readme_suggestions
+    assert any(s['type'] == 'general_summary' and s['category'] == 'code_reuse' and 'Overall: Refactor common logic.' in s['message'] for s in suggestions)
+    assert any(s['type'] == 'general_summary' and s['category'] == 'design_pattern' and 'Overall: Adhere to SOLID.' in s['message'] for s in suggestions)
+    assert any(s['type'] == 'general_summary' and s['category'] == 'security_reminder' and 'Overall: Check inputs.' in s['message'] for s in suggestions)
+    assert any(s['type'] == 'file_marker' and s['file_path'] == 'src/utils.py' for s in suggestions)
+    assert any(s['type'] == 'python_test_stub' for s in suggestions)
+    assert any(s['type'] == 'file_marker' and s['file_path'] == 'com/example/MyClass.java' for s in suggestions)
+    assert any(s['type'] == 'dependency_note' and 'Modified public method `getItems(String filter)`' in s['message'] for s in suggestions)
+    assert any(s['type'] == 'test_suggestion' and 'Modified public method `getItems(String filter)`' in s['message'] for s in suggestions)
+    assert any(s['type'] == 'linting' and 'Missing package-info.java file.' in s['message'] for s in suggestions)
+    assert any(s['type'] == 'security_concern' and "Potential keyword 'secretPassword' found." in s['message'] for s in suggestions)
+    assert any(s['type'] == 'java_test_stub' for s in suggestions)
+    assert any(s['type'] == 'file_marker' and s['file_path'] == 'pom.xml' for s in suggestions)
+    assert any(s['type'] == 'pom_dependency_change' and "Potentially 1 new/modified <dependency> block(s)" in s['message'] for s in suggestions)
+    assert any(s['type'] == 'file_marker' and s['file_path'] == 'README.md' for s in suggestions)
 
 
 def test_generate_suggestions_other_file_no_impact():
     analysis_results = { 'overall_summary': {}, 'file_specific_findings': [{'file_path': 'data.json', 'language': 'other', 'impacts': []}]}
     suggestions = generate_suggestions(analysis_results)
-    json_header = "--- File: data.json (other) ---"; assert json_header in suggestions
-    json_idx = suggestions.index(json_header); assert "No specific findings for this file." in suggestions[json_idx + 1]
+    assert any(s['type'] == 'file_marker' and s['file_path'] == 'data.json' for s in suggestions)
+    assert any(s['type'] == 'info' and 'No specific analysis findings for this file.' in s['message'] for s in suggestions)

@@ -1,0 +1,37 @@
+{
+  "name": "app",
+  "version": "1.0.0",
+  "description": "<img width=\"1024\" height=\"1024\" alt=\"ChatGPT Image Jul 18, 2025, 11_06_38 AM\" src=\"https://github.com/user-attachments/assets/6eca882e-6dfe-47e8-b34b-21a9f45eaee2\" />",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx}": [
+      "npx --no -- commitlint --edit"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sunit-bose/vidyut.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/sunit-bose/vidyut/issues"
+  },
+  "homepage": "https://github.com/sunit-bose/vidyut#readme",
+  "devDependencies": {
+    "@commitlint/cli": "^19.8.1",
+    "@commitlint/config-conventional": "^19.8.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.2"
+  }
+}
