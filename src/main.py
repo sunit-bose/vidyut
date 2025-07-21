@@ -229,6 +229,8 @@ def main():
                         print(f"    ❌ ERROR (Suggestion Gen): {sugg.get('message')}")
                     elif sugg_type == "ai_generated_code":
                         print(f"    🤖 AI Generated Code Detection: {sugg.get('message')} (Confidence: {sugg.get('confidence')})")
+                    elif sugg_type == "react_definition":
+                        print(f"    ⚛️ React Definition: {sugg.get('definition_type')} `{sugg.get('definition_name')}` with props: {sugg.get('props')}")
                     else:
                         print(f"    ❓ Unknown Suggestion: {sugg}")
             elif not res_suggestions and not has_analysis_issues and not res_error_message :

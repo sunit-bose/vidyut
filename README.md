@@ -13,6 +13,7 @@ Key analyses include:
 *   **Dependency analysis** for Maven `pom.xml` files.
 *   **Test stub generation** for new Python and Java code.
 *   **AI-Generated Code Detection:** An improved heuristic-based approach to detect potential AI-generated code.
+*   **React Analysis:** A heuristic-based approach to detect common patterns in React code.
 
 The agent aims to provide helpful insights to reviewers and authors, streamline the review cycle, and improve code quality. It's run via a command-line interface (CLI) and can process multiple PRs concurrently, offering a summary of findings and detailed suggestions.
 

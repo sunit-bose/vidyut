@@ -214,6 +214,16 @@ def generate_suggestions(analysis_results: dict) -> list[dict]:
                     "language": "maven_pom",
                     "message": f"No specific build dependency changes noted for this POM file."
                 })
+        elif language == 'react':
+            react_definitions = finding.get('react_definitions', [])
+            for definition in react_definitions:
+                structured_suggestions.append({
+                    "type": "react_definition",
+                    "file_path": file_path,
+                    "definition_type": definition.get('type'),
+                    "definition_name": definition.get('name'),
+                    "props": definition.get('props')
+                })
 
         elif language == 'other':
             if not impacts : # only show if no other impacts
