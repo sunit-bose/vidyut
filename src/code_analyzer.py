@@ -14,8 +14,8 @@ import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Tuple, Optional # Added Optional
 import json # Added for loading security keywords
 
-ANALYSIS_PYTHON_AST = "python_ast"; ANALYSIS_FLAKE8 = "flake8"; ANALYSIS_JAVA_CHECKSTYLE = "checkstyle"; ANALYSIS_JAVA_PARSER = "java_parser"; ANALYSIS_SECURITY_KEYWORD_SCAN = "security_scan"; ANALYSIS_PYTHON_TEST_STUB_GEN = "python_test_stubs"; ANALYSIS_MAVEN_POM = "maven_pom_analysis"; ANALYSIS_JAVA_TEST_STUB_GEN = "java_test_stubs"; ANALYSIS_AI_GENERATED_CODE = "ai_generated_code_detection"
-ALL_ANALYSES = [ANALYSIS_PYTHON_AST, ANALYSIS_FLAKE8, ANALYSIS_JAVA_CHECKSTYLE, ANALYSIS_JAVA_PARSER, ANALYSIS_SECURITY_KEYWORD_SCAN, ANALYSIS_PYTHON_TEST_STUB_GEN, ANALYSIS_MAVEN_POM, ANALYSIS_JAVA_TEST_STUB_GEN, ANALYSIS_AI_GENERATED_CODE]
+ANALYSIS_PYTHON_AST = "python_ast"; ANALYSIS_FLAKE8 = "flake8"; ANALYSIS_JAVA_CHECKSTYLE = "checkstyle"; ANALYSIS_JAVA_PARSER = "java_parser"; ANALYSIS_SECURITY_KEYWORD_SCAN = "security_scan"; ANALYSIS_PYTHON_TEST_STUB_GEN = "python_test_stubs"; ANALYSIS_MAVEN_POM = "maven_pom_analysis"; ANALYSIS_JAVA_TEST_STUB_GEN = "java_test_stubs"; ANALYSIS_AI_GENERATED_CODE = "ai_generated_code_detection"; ANALYSIS_REACT = "react_analysis"
+ALL_ANALYSES = [ANALYSIS_PYTHON_AST, ANALYSIS_FLAKE8, ANALYSIS_JAVA_CHECKSTYLE, ANALYSIS_JAVA_PARSER, ANALYSIS_SECURITY_KEYWORD_SCAN, ANALYSIS_PYTHON_TEST_STUB_GEN, ANALYSIS_MAVEN_POM, ANALYSIS_JAVA_TEST_STUB_GEN, ANALYSIS_AI_GENERATED_CODE, ANALYSIS_REACT]
 DEFAULT_ANALYSES_TO_RUN = [ANALYSIS_PYTHON_AST, ANALYSIS_FLAKE8, ANALYSIS_JAVA_CHECKSTYLE, ANALYSIS_SECURITY_KEYWORD_SCAN, ANALYSIS_JAVA_PARSER, ANALYSIS_MAVEN_POM]
 # RUDIMENTARY_SECURITY_KEYWORDS will be replaced by loaded config
 
@@ -572,7 +572,7 @@ class {test_class_name} {{
 
     if file_content and ANALYSIS_JAVA_CHECKSTYLE in analyses_to_run:
         tmp_file_path = ""
-        checkstyle_jar_cmd = os.getenv("CHECKSTYLE_JAR", "/tmp/checkstyle.jar")
+        checkstyle_jar_cmd = os.getenv("CHECKSTYLE_JAR", os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'tools', 'checkstyle.jar')))
 
         effective_checkstyle_config = DEFAULT_CHECKSTYLE_CONFIG
         if checkstyle_config_path:
@@ -704,6 +704,8 @@ def analyze_code_changes(
             findings = _analyze_java_file(file_info, pr_data, analyses_to_run, checkstyle_config_path=checkstyle_config_path)
         elif os.path.basename(filename) == 'pom.xml':
             findings = _analyze_maven_pom(file_info, pr_data, analyses_to_run)
+        elif filename.endswith(('.js', '.jsx', '.ts', '.tsx')):
+            findings = _analyze_react_file(file_info, pr_data, analyses_to_run)
         else:
             findings = _analyze_other_file(file_info, pr_data, analyses_to_run)
         if ANALYSIS_AI_GENERATED_CODE in analyses_to_run:
@@ -753,3 +755,42 @@ def _detect_ai_generated_code(patch_text: str) -> Optional[Dict[str, Any]]:
         }
 
     return None
+
+def _analyze_react_file(file_info: Dict[str, Any], pr_data: Dict[str, Any], analyses_to_run: List[str]) -> Dict[str, Any]:
+    filename = file_info.get('filename')
+    findings = {'file_path': filename, 'language': 'react', 'impacts': [], 'dependencies': [], 'tests_suggestions': [], 'security_issues': [], 'linting_issues': [], 'react_definitions': [], 'raw_analysis_data': {}}
+    owner = pr_data.get('owner'); repo = pr_data.get('repo'); head_sha = pr_data.get('head_sha')
+    file_content = None
+    if owner and repo and head_sha and filename:
+        api_headers = {"Accept": "application/vnd.github.v3+json"}; file_content = get_file_content_at_ref(owner, repo, filename, head_sha, api_headers)
+    else: findings['impacts'].append(f"Insufficient data to fetch full content for {filename}.")
+
+    if not file_content:
+        findings['impacts'].append(f"React file {filename} changed, but full content not fetched for analysis.")
+        return findings
+
+    # Heuristics to detect common React patterns
+    # 1. Look for functional components
+    functional_components = re.findall(r"const\s+([A-Z][a-zA-Z0-9_]*)\s*=\s*\(([^)]*)\)\s*=>", file_content)
+    for component in functional_components:
+        findings['react_definitions'].append({
+            "type": "Functional Component",
+            "name": component[0],
+            "props": component[1]
+        })
+
+    # 2. Look for class components
+    class_components = re.findall(r"class\s+([A-Z][a-zA-Z0-9_]*)\s*extends\s+(React\.Component|Component)", file_content)
+    for component in class_components:
+        findings['react_definitions'].append({
+            "type": "Class Component",
+            "name": component[0]
+        })
+
+    # 3. Look for state management patterns (e.g., Redux, MobX)
+    if "createStore" in file_content or "configureStore" in file_content:
+        findings['impacts'].append("Potential Redux store found. Changes to this file may have a wide-ranging impact on the application's state management.")
+    if "observable" in file_content or "makeObservable" in file_content:
+        findings['impacts'].append("Potential MobX store found. Changes to this file may have a wide-ranging impact on the application's state management.")
+
+    return findings
