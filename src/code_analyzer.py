@@ -572,7 +572,7 @@ class {test_class_name} {{
 
     if file_content and ANALYSIS_JAVA_CHECKSTYLE in analyses_to_run:
         tmp_file_path = ""
-        checkstyle_jar_cmd = os.getenv("CHECKSTYLE_JAR", "/tmp/checkstyle.jar")
+        checkstyle_jar_cmd = os.getenv("CHECKSTYLE_JAR", os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'tools', 'checkstyle.jar')))
 
         effective_checkstyle_config = DEFAULT_CHECKSTYLE_CONFIG
         if checkstyle_config_path:
