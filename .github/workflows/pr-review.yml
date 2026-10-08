@@ -1,0 +1,49 @@
+name: PR Review Agent
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  # Required to post the summary comment back onto the PR.
+  pull-requests: write
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Set up JRE (for Checkstyle/Java analysis)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run PR Review Agent
+        env:
+          # GITHUB_TOKEN is provided automatically by Actions; the 'permissions'
+          # block above grants it 'pull-requests: write' for this job.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python -m src.main "${{ github.event.pull_request.html_url }}" \
+            --analyses all \
+            --post-comment \
+            --fail-on security_concern
+        # Policy (see README "CI/CD Integration"):
+        #   - Posts one consolidated review comment on the PR.
+        #   - Fails this check only on 'security_concern' findings (tune via --fail-on).
+        #   - AI-generated-code detection is informational only and NEVER fails this check,
+        #     regardless of confidence, by design.

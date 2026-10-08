@@ -2,7 +2,7 @@ import pytest
 import requests # Import requests to allow mocking its exceptions
 import base64
 from unittest.mock import MagicMock # For more detailed mocking of response objects
-from src.pr_parser import get_pr_details, get_file_content_at_ref
+from src.pr_parser import get_pr_details, get_file_content_at_ref, post_pr_comment
 
 # Basic valid PR URL for testing regex and structure
 VALID_PR_URL = "https://github.com/owner/repo/pull/123"
@@ -213,6 +213,53 @@ def test_get_file_content_unicode_decoding_error(mock_requests_get, mocker):
     content = get_file_content_at_ref(owner, repo, path, ref, {})
     assert content is None
 
+def test_get_pr_details_includes_pr_number(mock_requests_get, mocker):
+    mock_pr_response_json = {
+        'title': 'T', 'body': 'B', 'user': {'login': 'u'}, 'html_url': VALID_PR_URL,
+        'created_at': '', 'updated_at': '', 'state': 'open',
+        'commits_url': '', 'comments_url': '', 'head': {'sha': VALID_HEAD_SHA}
+    }
+    def side_effect_func(url, headers, params=None):
+        mock_resp = mocker.Mock(spec=requests.Response)
+        mock_resp.raise_for_status = mocker.Mock()
+        mock_resp.status_code = 200
+        if url == API_BASE_URL:
+            mock_resp.json = mocker.Mock(return_value=mock_pr_response_json)
+        elif url == DIFF_URL:
+            mock_resp.text = "diff"
+        elif url == FILES_API_URL:
+            mock_resp.json = mocker.Mock(return_value=[])
+        return mock_resp
+    mock_requests_get.side_effect = side_effect_func
+
+    result = get_pr_details(VALID_PR_URL)
+    assert result['number'] == 123
+
+def test_get_pr_details_uses_token_in_auth_header(mock_requests_get, mocker):
+    mock_pr_response_json = {
+        'title': 'T', 'body': 'B', 'user': {'login': 'u'}, 'html_url': VALID_PR_URL,
+        'created_at': '', 'updated_at': '', 'state': 'open',
+        'commits_url': '', 'comments_url': '', 'head': {'sha': VALID_HEAD_SHA}
+    }
+    def side_effect_func(url, headers, params=None):
+        mock_resp = mocker.Mock(spec=requests.Response)
+        mock_resp.raise_for_status = mocker.Mock()
+        mock_resp.status_code = 200
+        if url == API_BASE_URL:
+            assert headers.get("Authorization") == "token secret-token"
+            mock_resp.json = mocker.Mock(return_value=mock_pr_response_json)
+        elif url == DIFF_URL:
+            assert headers.get("Authorization") == "token secret-token"
+            mock_resp.text = "diff"
+        elif url == FILES_API_URL:
+            assert headers.get("Authorization") == "token secret-token"
+            mock_resp.json = mocker.Mock(return_value=[])
+        return mock_resp
+    mock_requests_get.side_effect = side_effect_func
+
+    result = get_pr_details(VALID_PR_URL, github_token="secret-token")
+    assert result is not None
+
 def test_get_file_content_base64_actual_decode_error(mock_requests_get, mocker):
     owner, repo, path, ref = "user", "project", "file.txt", "testsha"
     not_base64_content = "This is not valid base64 content string %$#"
@@ -226,3 +273,36 @@ def test_get_file_content_base64_actual_decode_error(mock_requests_get, mocker):
 
     content = get_file_content_at_ref(owner, repo, path, ref, {})
     assert content is None
+
+
+# --- Tests for post_pr_comment ---
+
+def test_post_pr_comment_no_token_returns_false(capsys):
+    result = post_pr_comment("owner", "repo", 1, "body", "")
+    assert result is False
+    assert "no GitHub token provided" in capsys.readouterr().out
+
+def test_post_pr_comment_success(mocker, capsys):
+    mock_post = mocker.patch('src.pr_parser.requests.post')
+    mock_response = mocker.MagicMock(spec=requests.Response)
+    mock_response.raise_for_status = mocker.MagicMock()
+    mock_post.return_value = mock_response
+
+    result = post_pr_comment("owner", "repo", 42, "## Summary", "tok123")
+
+    assert result is True
+    mock_post.assert_called_once_with(
+        "https://api.github.com/repos/owner/repo/issues/42/comments",
+        headers={"Accept": "application/vnd.github.v3+json", "Authorization": "token tok123"},
+        json={"body": "## Summary"}
+    )
+    assert "Posted review comment to owner/repo#42" in capsys.readouterr().out
+
+def test_post_pr_comment_http_error_returns_false(mocker, capsys):
+    mock_post = mocker.patch('src.pr_parser.requests.post')
+    mock_post.side_effect = requests.exceptions.HTTPError("403 Forbidden")
+
+    result = post_pr_comment("owner", "repo", 42, "body", "tok123")
+
+    assert result is False
+    assert "Failed to post PR comment" in capsys.readouterr().out

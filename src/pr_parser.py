@@ -3,12 +3,15 @@ import re
 import base64
 from typing import Union, Dict # Added for type hinting
 
-def get_pr_details(pr_url):
+def get_pr_details(pr_url, github_token: Union[str, None] = None):
     """
     Fetches and parses PR data from a GitHub PR URL.
 
     Args:
         pr_url (str): The URL of the GitHub Pull Request.
+        github_token (str, optional): A GitHub Personal Access Token (or Actions
+            GITHUB_TOKEN) used to authenticate API requests. Authenticating raises
+            GitHub's rate limits substantially and is required for private repositories.
 
     Returns:
         dict: A dictionary containing PR details (e.g., title, description, files changed, diff).
@@ -25,6 +28,8 @@ def get_pr_details(pr_url):
     diff_url = f"{pr_url}.diff" # Standard way to get diff
 
     headers = {"Accept": "application/vnd.github.v3+json"}
+    if github_token:
+        headers["Authorization"] = f"token {github_token}"
     pr_data = {}
 
     try:
@@ -33,9 +38,11 @@ def get_pr_details(pr_url):
         response.raise_for_status() # Raises an exception for 4XX or 5XX status codes
         pr_json = response.json()
 
-        # Store owner, repo, and head_sha for later use (e.g., fetching file content)
+        # Store owner, repo, PR number, and head_sha for later use
+        # (e.g., fetching file content, posting a review comment back to the PR)
         pr_data['owner'] = owner
         pr_data['repo'] = repo
+        pr_data['number'] = int(pull_number)
         pr_data['head_sha'] = pr_json.get('head', {}).get('sha')
 
         pr_data['title'] = pr_json.get('title')
@@ -49,7 +56,10 @@ def get_pr_details(pr_url):
         pr_data['comments_url'] = pr_json.get('comments_url')
 
         # Get PR diff
-        diff_response = requests.get(diff_url, headers={"Accept": "application/vnd.github.v3.diff"})
+        diff_headers = {"Accept": "application/vnd.github.v3.diff"}
+        if github_token:
+            diff_headers["Authorization"] = f"token {github_token}"
+        diff_response = requests.get(diff_url, headers=diff_headers)
         diff_response.raise_for_status()
         pr_data['diff'] = diff_response.text
 
@@ -151,3 +161,38 @@ def get_file_content_at_ref(owner: str, repo: str, file_path: str, ref: str, hea
     except Exception as e: # Catch-all for other unexpected errors
         print(f"An unexpected error occurred fetching content for {file_path} at {ref}: {e}. URL: {api_url}?ref={ref}")
         return None
+
+
+def post_pr_comment(owner: str, repo: str, pr_number: int, body: str, github_token: str) -> bool:
+    """
+    Posts a single comment on a GitHub Pull Request. PRs share GitHub's "issue
+    comments" endpoint with issues, so this hits /issues/{pr_number}/comments.
+
+    Args:
+        owner (str): Repository owner.
+        repo (str): Repository name.
+        pr_number (int): The PR (issue) number.
+        body (str): Markdown comment body.
+        github_token (str): A token with at least 'pull-requests: write' permission
+            (e.g. the Actions-provided GITHUB_TOKEN, or a PAT).
+
+    Returns:
+        bool: True if the comment was posted successfully, False otherwise.
+    """
+    if not github_token:
+        print("Cannot post PR comment: no GitHub token provided. Pass --github-token or set GITHUB_TOKEN.")
+        return False
+
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/issues/{pr_number}/comments"
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "Authorization": f"token {github_token}",
+    }
+    try:
+        response = requests.post(api_url, headers=headers, json={"body": body})
+        response.raise_for_status()
+        print(f"Posted review comment to {owner}/{repo}#{pr_number}.")
+        return True
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to post PR comment to {owner}/{repo}#{pr_number}: {e}")
+        return False

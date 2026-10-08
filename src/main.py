@@ -1,5 +1,6 @@
 import argparse
 import concurrent.futures
+import os
 from typing import Tuple, Optional, List, Dict
 from pathlib import Path # Ensure Path is imported at top level if used globally
 import sys # Ensure sys is imported at top level for path manipulation
@@ -15,23 +16,97 @@ if __package__ is None or __package__ == '':
     if str(project_root) not in sys.path:
         sys.path.append(str(project_root))
 
-from src.pr_parser import get_pr_details
+from src.pr_parser import get_pr_details, post_pr_comment
 from src.code_analyzer import analyze_code_changes, ALL_ANALYSES, DEFAULT_ANALYSES_TO_RUN
 from src.suggestion_generator import generate_suggestions
 
 
 MAX_WORKERS = 4
 
+# Suggestion types that are informational only and must NEVER cause a build/CI failure,
+# no matter how high their reported confidence. AI-generated-code detection is a heuristic
+# signal for reviewers, not a policy violation, so it is excluded here unconditionally
+# even if a caller mistakenly asks to fail on it via --fail-on.
+NEVER_FAIL_SUGGESTION_TYPES = {"ai_generated_code"}
+
+# Suggestion types that represent a genuinely critical/actionable problem and are
+# reasonable defaults to fail CI on.
+DEFAULT_FAIL_ON_TYPES = ["security_concern"]
+
+
+def _build_pr_comment_markdown(pr_title: Optional[str], suggestions: Optional[List[Dict]]) -> str:
+    """Builds a concise Markdown summary of suggestions, suitable for posting as a single PR comment."""
+    lines = ["## 🤖 PR Review Agent Summary", ""]
+    if pr_title and pr_title != 'N/A':
+        lines.append(f"**PR:** {pr_title}")
+        lines.append("")
+
+    if not suggestions or (len(suggestions) == 1 and suggestions[0].get("type") == "info"):
+        lines.append("No specific actionable suggestions were generated.")
+        return "\n".join(lines)
+
+    current_file = None
+    for sugg in suggestions:
+        sugg_type = sugg.get("type")
+        if sugg_type == "file_marker":
+            current_file = sugg.get("file_path")
+            lines.append(f"\n### 📄 `{current_file}` ({sugg.get('language')})")
+        elif sugg_type == "linting":
+            lines.append(f"- L{sugg.get('line_number')} [{sugg.get('linter')}:{sugg.get('code')}] {sugg.get('message')}")
+        elif sugg_type == "security_concern":
+            lines.append(f"- 🛡️ **Security ({sugg.get('severity', 'warning').upper()}):** {sugg.get('message')}")
+        elif sugg_type == "react_issue":
+            lines.append(f"- ⚛️ **React:** {sugg.get('message')}")
+        elif sugg_type == "dependency_note":
+            lines.append(f"- 🔗 {sugg.get('message')}")
+        elif sugg_type == "test_suggestion":
+            lines.append(f"- 🧪 {sugg.get('message')}")
+        elif sugg_type == "pom_dependency_change":
+            lines.append(f"- 📦 {sugg.get('message')}")
+        elif sugg_type == "ai_generated_code":
+            lines.append(f"- 🤖 *Informational (does not affect CI status):* AI-generated-code heuristic matched (confidence {sugg.get('confidence')}): {sugg.get('message')}")
+        elif sugg_type == "file_impact":
+            lines.append(f"- ⚡ {sugg.get('message')}")
+    return "\n".join(lines)
+
+
+def determine_build_status(processed_results: List[Tuple], fail_on_types: List[str]) -> Tuple[bool, List[str]]:
+    """
+    Decides whether the overall run should be treated as a CI failure.
+
+    Policy:
+      - A critical per-PR processing error always counts as a failure.
+      - Any suggestion whose 'type' is in `fail_on_types` counts as a failure.
+      - 'ai_generated_code' NEVER counts as a failure, even if present in
+        fail_on_types, since AI-detection is informational/heuristic only.
+
+    Returns:
+        (should_fail, reasons): reasons is a human-readable list explaining why.
+    """
+    effective_fail_on = set(fail_on_types) - NEVER_FAIL_SUGGESTION_TYPES
+    reasons = []
+    for pr_url, _pr_title, _html_url, suggestions, error_message in processed_results:
+        if error_message:
+            reasons.append(f"{pr_url}: critical processing error - {error_message}")
+            continue
+        for sugg in (suggestions or []):
+            if sugg.get("type") in effective_fail_on:
+                reasons.append(f"{pr_url}: [{sugg.get('type')}] {sugg.get('message', '')} (File: {sugg.get('file_path', 'N/A')})")
+    return (len(reasons) > 0, reasons)
+
+
 # Updated type hint for the fourth element of the tuple to List[Dict]
 def process_single_pr(
     pr_url: str,
     analyses_to_run: List[str],
     checkstyle_config_path: Optional[str] = None,
-    flake8_options_str: Optional[str] = None  # New parameter
+    flake8_options_str: Optional[str] = None,  # New parameter
+    github_token: Optional[str] = None,
+    post_comment: bool = False
 ) -> Tuple[str, Optional[str], Optional[str], Optional[List[Dict]], Optional[str]]:
     try:
         print(f"Thread: Starting processing for {pr_url}")
-        pr_data = get_pr_details(pr_url)
+        pr_data = get_pr_details(pr_url, github_token=github_token)
         if not pr_data:
             return pr_url, None, None, None, f"Failed to fetch PR details (as reported by get_pr_details)."
 
@@ -43,10 +118,19 @@ def process_single_pr(
             pr_data,
             analyses_to_run,
             checkstyle_config_path=checkstyle_config_path,
-            flake8_options_str=flake8_options_str  # New argument
+            flake8_options_str=flake8_options_str,  # New argument
+            github_token=github_token
         )
 
         suggestions = generate_suggestions(analysis_results)
+
+        if post_comment:
+            owner = pr_data.get('owner'); repo = pr_data.get('repo'); pr_number = pr_data.get('number')
+            if owner and repo and pr_number:
+                comment_body = _build_pr_comment_markdown(pr_title, suggestions)
+                post_pr_comment(owner, repo, pr_number, comment_body, github_token)
+            else:
+                print(f"Thread: Cannot post comment for {pr_url}: missing owner/repo/PR number.")
 
         print(f"Thread: Finished processing for {pr_title} ({pr_url})")
         return pr_url, pr_title, html_url_from_data, suggestions, None
@@ -79,6 +163,29 @@ def main():
         default=None,
         help="Custom options string for Flake8 (e.g., '--ignore E501,W503 --max-line-length=88')."
     )
+    parser.add_argument(
+        "--github-token",
+        type=str,
+        default=os.environ.get("GITHUB_TOKEN"),
+        help="GitHub token for authenticated API requests (raises rate limits, required for private "
+             "repos and for --post-comment). Defaults to the GITHUB_TOKEN environment variable, which "
+             "GitHub Actions provides automatically."
+    )
+    parser.add_argument(
+        "--post-comment",
+        action="store_true",
+        help="Post a single consolidated summary comment on each reviewed PR. Requires --github-token "
+             "(or GITHUB_TOKEN) with 'pull-requests: write' permission."
+    )
+    parser.add_argument(
+        "--fail-on",
+        type=str,
+        default="security_concern",
+        help="Comma-separated suggestion type(s) that should cause this command to exit non-zero "
+             "(e.g. for failing a CI check). Default: 'security_concern'. Use 'none' to never fail. "
+             "NOTE: 'ai_generated_code' can never be included here - AI-generated-code detection is "
+             "informational only (by design) and will never fail the build, regardless of confidence."
+    )
 
     args = parser.parse_args()
     pr_urls_to_process = args.pr_urls
@@ -105,7 +212,23 @@ def main():
             print(f"Warning: Unknown analysis type(s) '{', '.join(invalid_choices)}' ignored. Available: {', '.join(ALL_ANALYSES)}")
         analyses_to_run = valid_choices
 
+    fail_on_str = args.fail_on
+    if fail_on_str is None or fail_on_str.lower() == 'none':
+        fail_on_types = []
+    else:
+        fail_on_types = [t.strip() for t in fail_on_str.split(',') if t.strip()]
+    requested_never_fail = [t for t in fail_on_types if t in NEVER_FAIL_SUGGESTION_TYPES]
+    if requested_never_fail:
+        print(f"Warning: --fail-on included {requested_never_fail}, but these types never fail the "
+              f"build by design (AI-generated-code detection is informational only). Ignoring them for "
+              f"failure purposes.")
+
+    if args.post_comment and not args.github_token:
+        print("Warning: --post-comment was requested but no GitHub token was provided "
+              "(use --github-token or set GITHUB_TOKEN). Comments will not be posted.")
+
     print(f"Analyses to run: {analyses_to_run if analyses_to_run else 'None selected (or explicitly chosen via ''none'')'}")
+    print(f"Fail-on suggestion types: {fail_on_types if fail_on_types else 'None (will not fail based on findings)'}")
     print(f"Starting review for {len(pr_urls_to_process)} PR(s) with up to {MAX_WORKERS} concurrent workers.")
     print("---" * 10)
 
@@ -117,7 +240,9 @@ def main():
                 url,
                 analyses_to_run,
                 args.checkstyle_config,
-                args.flake8_options  # New argument
+                args.flake8_options,  # New argument
+                args.github_token,
+                args.post_comment
             ): url
             for url in pr_urls_to_process
         }
@@ -231,6 +356,8 @@ def main():
                         print(f"    🤖 AI Generated Code Detection: {sugg.get('message')} (Confidence: {sugg.get('confidence')})")
                     elif sugg_type == "react_definition":
                         print(f"    ⚛️ React Definition: {sugg.get('definition_type')} `{sugg.get('definition_name')}` with props: {sugg.get('props')}")
+                    elif sugg_type == "react_issue":
+                        print(f"    ⚛️ React Issue ({sugg.get('severity', 'warning').upper()}): {sugg.get('message')} (File: {file_path})")
                     else:
                         print(f"    ❓ Unknown Suggestion: {sugg}")
             elif not res_suggestions and not has_analysis_issues and not res_error_message :
@@ -248,6 +375,20 @@ def main():
     print(f"  completed with no specific suggestions: {no_suggestions_generated_count}")
     print(f"  completed cleanly with suggestions: {completed_cleanly_count}")
     print("=" * 40)
+
+    should_fail, fail_reasons = determine_build_status(processed_results, fail_on_types)
+    print("\n" + "=" * 40)
+    print("🚦 Build Status 🚦")
+    print("=" * 40)
+    if should_fail:
+        print("❌ FAILING build due to:")
+        for reason in fail_reasons:
+            print(f"   - {reason}")
+        print("\nNote: AI-generated-code detections never cause a failure, regardless of confidence; "
+              "they are informational only.")
+        sys.exit(1)
+    else:
+        print("✅ PASSING (no findings matched the configured --fail-on types).")
 
 
 if __name__ == "__main__":

@@ -189,15 +189,6 @@ def generate_suggestions(analysis_results: dict) -> list[dict]:
                      "message": f"No specific code analysis suggestions for this Java file in this phase."
                  })
 
-        ai_generated_code = finding.get('ai_generated_code')
-        if ai_generated_code:
-            structured_suggestions.append({
-                "type": "ai_generated_code",
-                "file_path": file_path,
-                "confidence": ai_generated_code.get('confidence'),
-                "message": ai_generated_code.get('message')
-            })
-
         elif language == 'maven_pom':
             build_dep_changes = finding.get('build_dependency_changes', [])
             if build_dep_changes:
@@ -225,6 +216,51 @@ def generate_suggestions(analysis_results: dict) -> list[dict]:
                     "props": definition.get('props')
                 })
 
+            dependencies = finding.get('dependencies', [])
+            for dep_note in dependencies:
+                structured_suggestions.append({
+                    "type": "dependency_note",
+                    "file_path": file_path,
+                    "language": "react",
+                    "message": dep_note
+                })
+
+            tests_suggestions_list = finding.get('tests_suggestions', [])
+            for test_sugg in tests_suggestions_list:
+                structured_suggestions.append({
+                    "type": "test_suggestion",
+                    "file_path": file_path,
+                    "language": "react",
+                    "message": test_sugg
+                })
+
+            security_issues = finding.get('security_issues', [])
+            for sec_issue in security_issues:
+                structured_suggestions.append({
+                    "type": "security_concern",
+                    "file_path": file_path,
+                    "language": "react",
+                    "message": sec_issue,
+                    "severity": "warning"
+                })
+
+            react_issues = finding.get('react_issues', [])
+            for issue_text in react_issues:
+                structured_suggestions.append({
+                    "type": "react_issue",
+                    "file_path": file_path,
+                    "message": issue_text,
+                    "severity": "warning"
+                })
+
+            if not any([react_definitions, dependencies, tests_suggestions_list, security_issues, react_issues, impacts]):
+                structured_suggestions.append({
+                    "type": "info",
+                    "file_path": file_path,
+                    "language": "react",
+                    "message": f"No specific code analysis suggestions for this React/JS/TS file in this phase."
+                })
+
         elif language == 'other':
             if not impacts : # only show if no other impacts
                 structured_suggestions.append({
@@ -232,6 +268,15 @@ def generate_suggestions(analysis_results: dict) -> list[dict]:
                     "file_path": file_path,
                     "message": f"No specific analysis findings for this file."
                 })
+
+        ai_generated_code = finding.get('ai_generated_code')
+        if ai_generated_code:
+            structured_suggestions.append({
+                "type": "ai_generated_code",
+                "file_path": file_path,
+                "confidence": ai_generated_code.get('confidence'),
+                "message": ai_generated_code.get('message')
+            })
 
     if not structured_suggestions:
         # This case should ideally be rare if the initial check for empty file_findings and overall_summary is handled

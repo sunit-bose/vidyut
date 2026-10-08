@@ -18,8 +18,9 @@ Key analyses include:
 *   **Security scanning** for known sensitive keywords and risky patterns.
 *   **Dependency analysis** for Maven `pom.xml` files.
 *   **Test stub generation** for new Python and Java code.
-*   **AI-Generated Code Detection:** An improved heuristic-based approach to detect potential AI-generated code.
-*   **React Analysis:** A heuristic-based approach to detect common patterns in React code.
+*   **AI-Generated Code Detection:** A heuristic-based approach to detect potential AI-generated code, including named-tool/vendor signals (Copilot, Tabnine, **Claude/Anthropic**, ChatGPT/OpenAI, Gemini, Jules, etc.) and common commit-attribution trailers (e.g. `Co-Authored-By: Claude <noreply@anthropic.com>`, `Generated with Claude Code`). This is **informational only** — see the note under [AI-Generated Code Detection](#ai-generated-code-detection) below.
+*   **React/JS/TS Analysis:** A heuristic-based approach to React code: functional/class component detection with change tracking, hook usage (built-in and custom), and anti-pattern checks (missing `key` prop in list rendering, direct `this.state` mutation, `useEffect` missing a dependency array).
+*   **GitHub PR Integration:** Can authenticate to the GitHub API via a token and post a single consolidated review comment back onto the PR — see [CI/CD Integration](#cicd-integration).
 
 The agent aims to provide helpful insights to reviewers and authors, streamline the review cycle, and improve code quality. It's run via a command-line interface (CLI) and can process multiple PRs concurrently, offering a summary of findings and detailed suggestions.
 
@@ -39,6 +40,12 @@ The agent aims to provide helpful insights to reviewers and authors, streamline 
     *   Specific dependency notes and targeted JUnit test suggestions.
     *   Checkstyle linting (customizable config file via CLI using `--checkstyle-config`, defaults to Google's Java Style Guide).
     *   Experimental: Generates basic JUnit 5 boilerplate (stubs) for newly defined public Java classes, interfaces, enums, and their public methods (enable with `--analyses all` or by including `java_test_stubs`). Stubs use `UnsupportedOperationException` as placeholders.
+*   **React/JS/TS Analysis:**
+    *   Detects functional components (`const Foo = (props) => ...`) and class components (`class Foo extends React.Component`), tracking whether each is new or modified based on the PR's diff hunks (same approach as the Python/Java analyzers).
+    *   Detects hook usage, both built-in (`useState`, `useEffect`, ...) and custom (any `useXxx(...)` call).
+    *   Flags likely anti-patterns: list items rendered via `.map()` without a `key` prop, direct mutation of `this.state`, and `useEffect` calls missing a dependency array.
+    *   Runs the same configurable security keyword/pattern scan as Python/Java on `.js`/`.jsx`/`.ts`/`.tsx` patches.
+    *   Enabled by default (part of `--analyses default`); disable/select explicitly via the `react_analysis` analysis type.
 *   **Maven POM Analysis:** Identifies new/changed dependencies in `pom.xml`.
 *   **Configurable Security Scanning:** Detects keywords and regex patterns defined in `config/security_keywords.json` within changed code lines of Python, Java, and other text files.
 *   **Enhanced Console Reporting:** Provides a structured summary when processing multiple PRs, detailing successes, failures, and analyses with issues.
@@ -127,6 +134,12 @@ python -m src.main https://github.com/owner/repo/pull/123
     *   Example: `--checkstyle-config /path/to/my_checkstyle_rules.xml`
 *   **`--flake8-options "<OPTIONS_STRING>"`**: Custom options string for Flake8, enclosed in quotes (e.g., `"--ignore E501,W503 --max-line-length=88"`). These are passed directly to the `flake8` command.
     *   Example: `--flake8-options "--ignore E203,W503 --max-doc-length=120"`
+*   **`--github-token <TOKEN>`**: A GitHub token (PAT, or the Actions-provided `GITHUB_TOKEN`) used to authenticate all GitHub API requests. Defaults to the `GITHUB_TOKEN` environment variable if set. Required for private repositories and for `--post-comment`; strongly recommended in CI to avoid unauthenticated rate limits.
+*   **`--post-comment`**: Posts a single consolidated Markdown summary comment on each reviewed PR. Requires `--github-token` (or `GITHUB_TOKEN`) with `pull-requests: write` permission.
+*   **`--fail-on <types>`**: Comma-separated suggestion type(s) that cause the command to exit non-zero (e.g. to fail a CI check). Default: `security_concern`. Use `none` to never fail based on findings (a critical processing error still fails the run regardless).
+    *   Other usable values include `react_issue`, `linting`, `pom_dependency_change`, etc. — any `type` emitted by the suggestion generator.
+    *   **`ai_generated_code` can never be included here.** AI-generated-code detection is informational only, by design, and will never fail the build no matter how high its confidence score — see [AI-Generated Code Detection](#ai-generated-code-detection).
+    *   Example: `--fail-on security_concern,react_issue`
 
 **Example with options:**
 ```bash
@@ -151,9 +164,17 @@ After all PRs are processed, an **Overall Processing Summary** is displayed, tal
 
 ### GitHub API Rate Limiting & Private Repositories
 
-The agent makes calls to the GitHub API. For unauthenticated requests, GitHub imposes rate limits. For frequent use or private repositories, a GitHub Personal Access Token (PAT) is recommended.
+The agent makes calls to the GitHub API. For unauthenticated requests, GitHub imposes low rate limits. For frequent use, private repositories, or posting comments back to a PR, pass a GitHub token via `--github-token <TOKEN>` or the `GITHUB_TOKEN` environment variable (GitHub Actions sets this automatically — see [CI/CD Integration](#cicd-integration)).
 
-*(Note: The agent currently does not have a direct command-line option or persistent configuration for tokens. To use a token with the current version, you would need to modify the `api_headers` in `src/pr_parser.py` (within `get_pr_details` and `get_file_content_at_ref`) to include the `Authorization` header, like `api_headers["Authorization"] = f"token YOUR_PAT_HERE"`. This will be improved in future versions.)*
+### AI-Generated Code Detection
+
+`_detect_ai_generated_code` (in `src/code_analyzer.py`) is a **heuristic**, not a certainty check. It looks for two independent signals in a file's diff:
+
+1.  **Named AI tool/vendor mentions** (confidence 0.9) — e.g. `Copilot`, `Tabnine`, `Claude`, `Anthropic`, `ChatGPT`, `OpenAI`, `Gemini`, `Jules`.
+2.  **Attribution patterns** (confidence 0.85) commonly left by AI coding assistants, e.g. `Co-Authored-By: Claude <noreply@anthropic.com>`, `Generated with Claude Code`, or generic `AI-generated`/`AI-assisted` markers.
+3.  A weak fallback heuristic (confidence 0.5) flags an unusually large number of newly *added* comment lines in a single patch.
+
+**This finding is informational only.** It is surfaced in the console output, the structured suggestions (`type: "ai_generated_code"`), and the posted PR comment, but it can never fail a CI run — `ai_generated_code` is excluded from `--fail-on` even if explicitly requested. The intent is to flag likely AI-authored changes for a human reviewer's awareness, not to gate merges on an inherently fuzzy signal.
 
 ## Customization
 
@@ -252,28 +273,55 @@ pipeline {
 
 ### GitHub Actions
 
+A ready-to-use workflow is included at [`.github/workflows/pr-review.yml`](.github/workflows/pr-review.yml). It:
+
+*   Triggers on `pull_request` (opened/synchronize/reopened).
+*   Installs Python + a JRE (for Checkstyle) and the project's dependencies.
+*   Runs the agent with `--analyses all --post-comment --fail-on security_concern`, authenticated with the Actions-provided `GITHUB_TOKEN`.
+*   Grants the job `pull-requests: write` so it can post the consolidated review comment, per the policy described in `--post-comment`/`--fail-on` above.
+
 ```yaml
-name: PR Review
+name: PR Review Agent
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write # Required to post the summary comment back onto the PR.
+  contents: read
 
 jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: Set up Python 3.9
-        uses: actions/setup-python@v2
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: 3.9
+          python-version: "3.9"
+      - uses: actions/setup-java@v4 # For Checkstyle/Java analysis
+        with:
+          distribution: "temurin"
+          java-version: "17"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Run PR Review
-        run: python -m src.main ${{ github.event.pull_request.html_url }}
+      - name: Run PR Review Agent
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python -m src.main "${{ github.event.pull_request.html_url }}" \
+            --analyses all \
+            --post-comment \
+            --fail-on security_concern
 ```
+
+Devops notes:
+
+*   **Failure policy** is deliberately asymmetric: `security_concern` findings (and any critical processing error) fail the check; `ai_generated_code` findings never do, regardless of confidence — they're surfaced in the posted comment for human awareness only. Tune which types fail the build via `--fail-on` (comma-separated), e.g. `--fail-on security_concern,react_issue`.
+*   No extra secret setup is needed for public repos in the same org/repo — the default `GITHUB_TOKEN` Actions provides already has the right scope once `permissions.pull-requests: write` is set on the job.
+*   For other CI platforms (Jenkins/GitLab/Bitbucket below), pass an equivalent token through `--github-token` (or `GITHUB_TOKEN` env var) and add `--post-comment --fail-on security_concern` the same way.
 
 ### GitLab CI/CD
 

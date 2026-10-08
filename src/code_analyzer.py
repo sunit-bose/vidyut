@@ -16,7 +16,7 @@ import json # Added for loading security keywords
 
 ANALYSIS_PYTHON_AST = "python_ast"; ANALYSIS_FLAKE8 = "flake8"; ANALYSIS_JAVA_CHECKSTYLE = "checkstyle"; ANALYSIS_JAVA_PARSER = "java_parser"; ANALYSIS_SECURITY_KEYWORD_SCAN = "security_scan"; ANALYSIS_PYTHON_TEST_STUB_GEN = "python_test_stubs"; ANALYSIS_MAVEN_POM = "maven_pom_analysis"; ANALYSIS_JAVA_TEST_STUB_GEN = "java_test_stubs"; ANALYSIS_AI_GENERATED_CODE = "ai_generated_code_detection"; ANALYSIS_REACT = "react_analysis"
 ALL_ANALYSES = [ANALYSIS_PYTHON_AST, ANALYSIS_FLAKE8, ANALYSIS_JAVA_CHECKSTYLE, ANALYSIS_JAVA_PARSER, ANALYSIS_SECURITY_KEYWORD_SCAN, ANALYSIS_PYTHON_TEST_STUB_GEN, ANALYSIS_MAVEN_POM, ANALYSIS_JAVA_TEST_STUB_GEN, ANALYSIS_AI_GENERATED_CODE, ANALYSIS_REACT]
-DEFAULT_ANALYSES_TO_RUN = [ANALYSIS_PYTHON_AST, ANALYSIS_FLAKE8, ANALYSIS_JAVA_CHECKSTYLE, ANALYSIS_SECURITY_KEYWORD_SCAN, ANALYSIS_JAVA_PARSER, ANALYSIS_MAVEN_POM]
+DEFAULT_ANALYSES_TO_RUN = [ANALYSIS_PYTHON_AST, ANALYSIS_FLAKE8, ANALYSIS_JAVA_CHECKSTYLE, ANALYSIS_SECURITY_KEYWORD_SCAN, ANALYSIS_JAVA_PARSER, ANALYSIS_MAVEN_POM, ANALYSIS_REACT]
 # RUDIMENTARY_SECURITY_KEYWORDS will be replaced by loaded config
 
 SECURITY_SCAN_CONFIG_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'config', 'security_keywords.json'))
@@ -125,13 +125,16 @@ def _format_javalang_type_node(type_node) -> str:
         name_str += "[]" * len(type_node.dimensions)
     return name_str
 
-def _analyze_python_file(file_info: Dict[str, Any], pr_data: Dict[str, Any], analyses_to_run: List[str], flake8_options_str: Optional[str] = None) -> Dict[str, Any]:
+def _analyze_python_file(file_info: Dict[str, Any], pr_data: Dict[str, Any], analyses_to_run: List[str], flake8_options_str: Optional[str] = None, github_token: Optional[str] = None) -> Dict[str, Any]:
     filename = file_info.get('filename')
     findings = {'file_path': filename, 'language': 'python', 'impacts': [], 'dependencies': [], 'tests_suggestions': [], 'security_issues': [], 'linting_issues': [], 'python_definitions': [], 'python_test_stubs': [], 'raw_analysis_data': {}}
     owner = pr_data.get('owner'); repo = pr_data.get('repo'); head_sha = pr_data.get('head_sha')
     file_content = None
     if owner and repo and head_sha and filename:
-        api_headers = {"Accept": "application/vnd.github.v3+json"}; file_content = get_file_content_at_ref(owner, repo, filename, head_sha, api_headers)
+        api_headers = {"Accept": "application/vnd.github.v3+json"}
+        if github_token:
+            api_headers["Authorization"] = f"token {github_token}"
+        file_content = get_file_content_at_ref(owner, repo, filename, head_sha, api_headers)
     else: findings['impacts'].append(f"Insufficient data to fetch full content for {filename}.")
     if not file_content and (ANALYSIS_PYTHON_AST in analyses_to_run or ANALYSIS_FLAKE8 in analyses_to_run):
         findings['impacts'].append(f"Python file {filename} changed, but full content not fetched for analysis (using patch for other checks if available).")
@@ -301,13 +304,16 @@ if __name__ == '__main__':
         else: findings['tests_suggestions'].append(f"No content or patch data for {filename} to provide specific test suggestions.")
     return findings
 
-def _analyze_java_file(file_info: Dict[str, Any], pr_data: Dict[str, Any], analyses_to_run: List[str], checkstyle_config_path: Optional[str] = None) -> Dict[str, Any]:
+def _analyze_java_file(file_info: Dict[str, Any], pr_data: Dict[str, Any], analyses_to_run: List[str], checkstyle_config_path: Optional[str] = None, github_token: Optional[str] = None) -> Dict[str, Any]:
     filename = file_info.get('filename')
     findings = {'file_path': filename, 'language': 'java', 'impacts': [], 'dependencies': [], 'tests_suggestions': [], 'security_issues': [], 'linting_issues': [], 'java_definitions': [], 'java_test_stubs': [], 'raw_analysis_data': {}}
     owner = pr_data.get('owner'); repo = pr_data.get('repo'); head_sha = pr_data.get('head_sha')
     file_content = None
     if owner and repo and head_sha and filename:
-        api_headers = {"Accept": "application/vnd.github.v3+json"}; file_content = get_file_content_at_ref(owner, repo, filename, head_sha, api_headers)
+        api_headers = {"Accept": "application/vnd.github.v3+json"}
+        if github_token:
+            api_headers["Authorization"] = f"token {github_token}"
+        file_content = get_file_content_at_ref(owner, repo, filename, head_sha, api_headers)
     else: findings['impacts'].append(f"Insufficient data to fetch full content for {filename}.")
 
     if not file_content and (ANALYSIS_JAVA_PARSER in analyses_to_run or ANALYSIS_JAVA_CHECKSTYLE in analyses_to_run):
@@ -615,7 +621,7 @@ class {test_class_name} {{
         else: findings['tests_suggestions'].append(f"No content or patch data for {filename}. Review file status and ensure coverage.")
     return findings
 
-def _analyze_maven_pom(file_info: Dict[str, Any], pr_data: Dict[str, Any], analyses_to_run: List[str]) -> Dict[str, Any]:
+def _analyze_maven_pom(file_info: Dict[str, Any], pr_data: Dict[str, Any], analyses_to_run: List[str], github_token: Optional[str] = None) -> Dict[str, Any]:
     # ... (Content from step 53 - correct)
     findings = {'file_path': file_info.get('filename'), 'language': 'maven_pom', 'build_dependency_changes': [], 'impacts': [], 'security_issues': [] } # Added security_issues for consistency
     filename = file_info.get('filename')
@@ -624,7 +630,10 @@ def _analyze_maven_pom(file_info: Dict[str, Any], pr_data: Dict[str, Any], analy
         return findings
     owner = pr_data.get('owner'); repo = pr_data.get('repo'); head_sha = pr_data.get('head_sha'); file_content = None
     if owner and repo and head_sha and filename:
-        api_headers = {"Accept": "application/vnd.github.v3+json"}; file_content = get_file_content_at_ref(owner, repo, filename, head_sha, api_headers)
+        api_headers = {"Accept": "application/vnd.github.v3+json"}
+        if github_token:
+            api_headers["Authorization"] = f"token {github_token}"
+        file_content = get_file_content_at_ref(owner, repo, filename, head_sha, api_headers)
     if not file_content: findings['impacts'].append(f"Content for {filename} not available. Skipping pom.xml analysis."); return findings
     try:
         root = ET.fromstring(file_content); namespace = ""
@@ -682,7 +691,8 @@ def analyze_code_changes(
     pr_data: Dict[str, Any],
     analyses_to_run: List[str],
     checkstyle_config_path: Optional[str] = None,
-    flake8_options_str: Optional[str] = None
+    flake8_options_str: Optional[str] = None,
+    github_token: Optional[str] = None
 ) -> Dict[str, Any]:
     if not pr_data or 'files_changed' not in pr_data:
         print("Error: Invalid PR data provided for analysis in analyze_code_changes.")
@@ -699,13 +709,13 @@ def analyze_code_changes(
         filename = file_info.get('filename', '');
         if not filename: continue
         if filename.endswith('.py'):
-            findings = _analyze_python_file(file_info, pr_data, analyses_to_run, flake8_options_str=flake8_options_str)
+            findings = _analyze_python_file(file_info, pr_data, analyses_to_run, flake8_options_str=flake8_options_str, github_token=github_token)
         elif filename.endswith('.java'):
-            findings = _analyze_java_file(file_info, pr_data, analyses_to_run, checkstyle_config_path=checkstyle_config_path)
+            findings = _analyze_java_file(file_info, pr_data, analyses_to_run, checkstyle_config_path=checkstyle_config_path, github_token=github_token)
         elif os.path.basename(filename) == 'pom.xml':
-            findings = _analyze_maven_pom(file_info, pr_data, analyses_to_run)
+            findings = _analyze_maven_pom(file_info, pr_data, analyses_to_run, github_token=github_token)
         elif filename.endswith(('.js', '.jsx', '.ts', '.tsx')):
-            findings = _analyze_react_file(file_info, pr_data, analyses_to_run)
+            findings = _analyze_react_file(file_info, pr_data, analyses_to_run, github_token=github_token)
         else:
             findings = _analyze_other_file(file_info, pr_data, analyses_to_run)
         if ANALYSIS_AI_GENERATED_CODE in analyses_to_run:
@@ -725,72 +735,178 @@ def analyze_code_changes(
 
     return {'overall_summary': {'reuse_suggestions': overall_reuse_suggestions, 'solid_violations': overall_solid_violations, 'general_security_reminders': general_security_reminders}, 'file_specific_findings': file_specific_findings_list}
 
+# Named AI coding tools/vendors. Mentioning one of these by name (e.g. in a comment,
+# commit message fragment carried into the patch, or attribution trailer) is a strong
+# signal, since humans rarely type these names into source code unprompted.
+_AI_TOOL_NAMES = [
+    "copilot", "tabnine", "jules", "claude", "anthropic", "chatgpt",
+    "openai", "codex", "gemini", "cursor ai", "amazon q", "codewhisperer",
+]
+
+# Structural attribution patterns used by AI coding assistants/CI bots when they
+# generate or co-author changes (e.g. git trailers). These are checked independently
+# of the plain tool-name list above because they can appear without the tool's name
+# being an isolated word (e.g. "noreply@anthropic.com").
+_AI_ATTRIBUTION_PATTERNS = [
+    re.compile(r"co-authored-by:\s*claude", re.IGNORECASE),
+    re.compile(r"co-authored-by:[^\n]*@anthropic\.com", re.IGNORECASE),
+    re.compile(r"generated[\s-]*with\s*\[?claude code\]?", re.IGNORECASE),
+    re.compile(r"claude\.ai/code", re.IGNORECASE),
+    re.compile(r"ai[\s-]generated", re.IGNORECASE),
+    re.compile(r"ai[\s-]assisted", re.IGNORECASE),
+    re.compile(r"generated by\s+[\w.\- ]+", re.IGNORECASE),
+]
+
 def _detect_ai_generated_code(patch_text: str) -> Optional[Dict[str, Any]]:
     """
     A heuristic-based approach to detect potential AI-generated code.
-    This is not a definitive solution and should be used with caution.
+    This is informational only (confidence is NOT a certainty) and should never be
+    treated as a build-blocking signal on its own.
     """
     if not patch_text:
         return None
 
-    # Heuristics to detect AI-generated code
-    # 1. Look for common AI-related keywords in comments
-    ai_keywords = ["Copilot", "Tabnine", "AI-generated", "AI-assisted", "generated by", "Jules"]
-    for keyword in ai_keywords:
-        if keyword.lower() in patch_text.lower():
+    text_lower = patch_text.lower()
+
+    # 1. High-confidence: explicit mention of a named AI coding tool/vendor.
+    for tool_name in _AI_TOOL_NAMES:
+        if tool_name in text_lower:
             return {
                 "confidence": 0.9,
-                "message": f"Potential AI-generated code detected. Found keyword: '{keyword}'"
+                "message": f"Potential AI-generated code detected. Found reference to AI tool/vendor: '{tool_name}'."
             }
 
-    # 2. Look for long, complex, and well-formatted comments that are not typical of human developers
-    # This is a very basic heuristic and may not be accurate
-    # A more advanced approach would involve analyzing the code structure and style
-    # For now, we will just check for the length of the comments
-    comment_lines = [line for line in patch_text.splitlines() if line.strip().startswith("#")]
-    if len(comment_lines) > 10:
+    # 2. High-confidence: structural attribution patterns (commit trailers, banners).
+    for pattern in _AI_ATTRIBUTION_PATTERNS:
+        match = pattern.search(patch_text)
+        if match:
+            return {
+                "confidence": 0.85,
+                "message": f"Potential AI-generated code detected. Matched AI-attribution pattern: '{match.group(0).strip()}'."
+            }
+
+    # 3. Weak heuristic: an unusually large number of newly added comment lines.
+    # This is a very basic heuristic and may not be accurate; only *added* lines
+    # (diff lines starting with '+') are considered, not unchanged context lines.
+    added_comment_lines = [
+        line[1:] for line in patch_text.splitlines()
+        if line.startswith('+') and not line.startswith('+++')
+        and line[1:].strip().startswith(("#", "//"))
+    ]
+    if len(added_comment_lines) > 10:
         return {
-            "confidence": 0.6,
-            "message": "Potential AI-generated code detected. Found a large number of comments."
+            "confidence": 0.5,
+            "message": "Potential AI-generated code detected (weak signal). Found an unusually large number of newly added comment lines."
         }
 
     return None
 
-def _analyze_react_file(file_info: Dict[str, Any], pr_data: Dict[str, Any], analyses_to_run: List[str]) -> Dict[str, Any]:
+def _line_number_at_offset(text: str, offset: int) -> int:
+    """Returns the 1-based line number of `offset` within `text`."""
+    return text.count('\n', 0, offset) + 1
+
+def _analyze_react_file(file_info: Dict[str, Any], pr_data: Dict[str, Any], analyses_to_run: List[str], github_token: Optional[str] = None) -> Dict[str, Any]:
     filename = file_info.get('filename')
-    findings = {'file_path': filename, 'language': 'react', 'impacts': [], 'dependencies': [], 'tests_suggestions': [], 'security_issues': [], 'linting_issues': [], 'react_definitions': [], 'raw_analysis_data': {}}
+    findings = {'file_path': filename, 'language': 'react', 'impacts': [], 'dependencies': [], 'tests_suggestions': [], 'security_issues': [], 'linting_issues': [], 'react_definitions': [], 'react_issues': [], 'raw_analysis_data': {}}
+
+    patch_text = file_info.get('patch')
+    if patch_text and ANALYSIS_SECURITY_KEYWORD_SCAN in analyses_to_run:
+        findings['security_issues'] = _perform_security_scan(patch_text)
+
+    if ANALYSIS_REACT not in analyses_to_run:
+        findings['impacts'].append(f"React analysis skipped for {filename}.")
+        return findings
+
     owner = pr_data.get('owner'); repo = pr_data.get('repo'); head_sha = pr_data.get('head_sha')
     file_content = None
     if owner and repo and head_sha and filename:
-        api_headers = {"Accept": "application/vnd.github.v3+json"}; file_content = get_file_content_at_ref(owner, repo, filename, head_sha, api_headers)
+        api_headers = {"Accept": "application/vnd.github.v3+json"}
+        if github_token:
+            api_headers["Authorization"] = f"token {github_token}"
+        file_content = get_file_content_at_ref(owner, repo, filename, head_sha, api_headers)
     else: findings['impacts'].append(f"Insufficient data to fetch full content for {filename}.")
 
     if not file_content:
         findings['impacts'].append(f"React file {filename} changed, but full content not fetched for analysis.")
         return findings
 
-    # Heuristics to detect common React patterns
-    # 1. Look for functional components
-    functional_components = re.findall(r"const\s+([A-Z][a-zA-Z0-9_]*)\s*=\s*\(([^)]*)\)\s*=>", file_content)
-    for component in functional_components:
+    file_status = file_info.get('status', 'modified')
+    changed_line_info = _get_changed_line_ranges_from_patch(patch_text) if patch_text else []
+
+    def _change_type_for_line(start_line: int) -> Optional[str]:
+        if file_status == 'added':
+            return 'new'
+        for hunk_start, hunk_length in changed_line_info:
+            hunk_end = hunk_start + hunk_length - 1
+            if hunk_start <= start_line <= hunk_end:
+                return 'modified'
+        return None
+
+    # 1. Functional components
+    for match in re.finditer(r"const\s+([A-Z][a-zA-Z0-9_]*)\s*=\s*\(([^)]*)\)\s*=>", file_content):
+        start_line = _line_number_at_offset(file_content, match.start())
         findings['react_definitions'].append({
             "type": "Functional Component",
-            "name": component[0],
-            "props": component[1]
+            "name": match.group(1),
+            "props": match.group(2),
+            "start_line": start_line,
+            "change_type": _change_type_for_line(start_line)
         })
 
-    # 2. Look for class components
-    class_components = re.findall(r"class\s+([A-Z][a-zA-Z0-9_]*)\s*extends\s+(React\.Component|Component)", file_content)
-    for component in class_components:
+    # 2. Class components
+    for match in re.finditer(r"class\s+([A-Z][a-zA-Z0-9_]*)\s*extends\s+(React\.Component|Component)", file_content):
+        start_line = _line_number_at_offset(file_content, match.start())
         findings['react_definitions'].append({
             "type": "Class Component",
-            "name": component[0]
+            "name": match.group(1),
+            "start_line": start_line,
+            "change_type": _change_type_for_line(start_line)
         })
 
-    # 3. Look for state management patterns (e.g., Redux, MobX)
+    # 3. Hook usage (built-in, e.g. useState/useEffect, and custom hooks, e.g. useAuth)
+    hook_names = sorted(set(re.findall(r"\b(use[A-Z][a-zA-Z0-9]*)\s*\(", file_content)))
+    for hook_name in hook_names:
+        findings['react_definitions'].append({"type": "Hook Usage", "name": hook_name})
+
+    # 4. State management libraries (e.g. Redux, MobX)
     if "createStore" in file_content or "configureStore" in file_content:
         findings['impacts'].append("Potential Redux store found. Changes to this file may have a wide-ranging impact on the application's state management.")
     if "observable" in file_content or "makeObservable" in file_content:
         findings['impacts'].append("Potential MobX store found. Changes to this file may have a wide-ranging impact on the application's state management.")
+
+    # 5. Heuristic anti-pattern checks
+    for match in re.finditer(r"\.map\([^)]*=>\s*\(?\s*(<[A-Za-z])", file_content):
+        snippet_end = min(len(file_content), match.start() + 200)
+        snippet = file_content[match.start():snippet_end]
+        jsx_tag_end = snippet.find('>')
+        opening_tag = snippet[:jsx_tag_end + 1] if jsx_tag_end != -1 else snippet
+        if "key=" not in opening_tag:
+            line_no = _line_number_at_offset(file_content, match.start())
+            findings['react_issues'].append(f"Possible missing `key` prop on list item rendered via `.map()` near line {line_no} in {filename}. React list items should have a stable, unique `key`.")
+
+    if re.search(r"this\.state\.\w+\s*=(?!=)", file_content):
+        findings['react_issues'].append(f"Direct mutation of `this.state` detected in {filename}. State should be updated via `setState()`, not direct assignment.")
+
+    for match in re.finditer(r"useEffect\(\s*\([^)]*\)\s*=>\s*\{(?:[^{}]|\{[^{}]*\})*\}\s*\)", file_content):
+        if not re.search(r"\}\s*,\s*\[[^\]]*\]\s*\)\s*;?$", match.group(0)):
+            line_no = _line_number_at_offset(file_content, match.start())
+            findings['react_issues'].append(f"`useEffect` near line {line_no} in {filename} appears to be missing a dependency array; it will run on every render.")
+
+    # Correlate new/modified component definitions into dependency notes & test suggestions,
+    # mirroring the Python/Java analyzers.
+    for definition in findings['react_definitions']:
+        change = definition.get('change_type')
+        if not change:
+            continue
+        def_type = definition['type']; name = definition['name']; start_line = definition.get('start_line', 0)
+        change_verb = "New" if change == 'new' else "Modified"
+        findings['dependencies'].append(f"{change_verb} {def_type} `{name}` (line {start_line}) in {filename}. Review usage and potential impacts on consumers.")
+        findings['tests_suggestions'].append(f"{change_verb} {def_type} `{name}` (line {start_line}) in {filename}. Recommend rendering tests (e.g. React Testing Library) covering props, user interaction, and conditional rendering.")
+
+    if findings['react_issues']:
+        findings['impacts'].append(f"Identified {len(findings['react_issues'])} potential React anti-pattern(s) in {filename}.")
+
+    if not findings['tests_suggestions']:
+        findings['tests_suggestions'].append(f"Generic reminder: Ensure adequate component/rendering test coverage for changes in {filename}.")
 
     return findings
